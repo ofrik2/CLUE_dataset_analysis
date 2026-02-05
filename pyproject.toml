@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clue_pathway_enrichment"
+version = "0.0.0"
+description = "Skeleton package for CLUE pathway enrichment"
+readme = "README.md"
+authors = [ { name = "Auto", email = "you@example.com" } ]
+
+[tool.poetry.dependencies]
+python = ">=3.8"
+
+# No runtime dependencies for the skeleton. Use requirements.txt for dev/test deps.
