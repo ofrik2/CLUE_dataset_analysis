@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 import pandas as pd
 
 from clue_pathway_enrichment.io.load_signature import load_signature_table
@@ -10,13 +11,14 @@ from clue_pathway_enrichment.methods.xlmhg_wrapper import run_xlmhg
 from clue_pathway_enrichment.analysis.ranking import add_ranks
 from clue_pathway_enrichment.analysis.correlations import spearman_between_ranks
 
+
 def run(
     signature_path: str,
     pathway_csv: str,
     direction: str = "both",   # "pos" | "neg" | "both"
     alpha: float = 0.2,
     n_perm: int = 200,
-    seed: int | None = 0,
+    seed: Optional[int] = 0,
     X: int = 1,
     L: int = 100,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
@@ -75,3 +77,34 @@ def run(
 
     res2 = pd.concat(out, ignore_index=True) if out else pd.DataFrame()
     return res2, spearman_by_dir
+
+
+def run_from_config(
+    config_path: str,
+    *,
+    direction: Optional[str] = None,
+    alpha: Optional[float] = None,
+    n_perm: Optional[int] = None,
+    seed: Optional[int] = None,
+    X: Optional[int] = None,
+    L: Optional[int] = None,
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    """Load a config (JSON preferred; TOML supported) and run the pipeline.
+
+    This is a thin helper around :func:`run`.
+    """
+
+    from clue_pathway_enrichment.pipeline.config import load_pipeline_config
+
+    cfg = load_pipeline_config(config_path)
+
+    return run(
+        signature_path=cfg.signature_path,
+        pathway_csv=cfg.pathway_csv,
+        direction=direction if direction is not None else cfg.direction,
+        alpha=alpha if alpha is not None else cfg.alpha,
+        n_perm=n_perm if n_perm is not None else cfg.n_perm,
+        seed=seed if seed is not None else cfg.seed,
+        X=X if X is not None else cfg.X,
+        L=L if L is not None else cfg.L,
+    )

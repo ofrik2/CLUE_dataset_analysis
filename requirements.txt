@@ -1,1 +1,5 @@
 pytest>=7.0
+pandas
+# TOML parser backport for Python <3.11
+# (Python 3.11+ uses tomllib from the stdlib)
+tomli; python_version < '3.11'
