@@ -26,12 +26,11 @@ flowchart TD
   B --> E["Rank genes by score"]
   D --> E
 
-  F{"Direction"}
-  E --> F
+  E --> F{Direction}
 
-  F -->|pos|  G["Build hit vectors"]
-  F -->|neg|  H["Build hit vectors"]
-  F -->|both| I["Build hit vectors pos and neg"]
+  F -->|pos|G["Build hit vectors"]
+  F -->|neg|H["Build hit vectors"]
+  F -->|both|I["Build hit vectors pos and neg"]
 
   G --> J["alpha-RRA<br/>perm p-values"]
   G --> K["XL-mHG"]
@@ -44,6 +43,7 @@ flowchart TD
   K --> L
   L --> M["Spearman rank correlation<br/>alpha-RRA vs XL-mHG"]
   M --> N["Write outputs<br/>CSV results and JSON correlations"]
+
 
 ```
 
