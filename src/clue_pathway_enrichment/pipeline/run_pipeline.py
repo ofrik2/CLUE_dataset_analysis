@@ -26,8 +26,8 @@ def run(
     pathways = load_pathway_mapping_csv(pathway_csv)
 
     pos_ranked, neg_ranked = split_and_rank_signature(sig)
-
     ranked_by_dir = {"pos": pos_ranked, "neg": neg_ranked}
+
     enabled = ["pos", "neg"] if direction == "both" else [direction]
     for d in enabled:
         if d not in ranked_by_dir:
@@ -39,6 +39,7 @@ def run(
         if ranked.empty:
             continue
 
+        #iterating pathways
         for pname, geneset in pathways.items():
             v = pathway_to_binary_vector(ranked, geneset)
             k = int(v.sum())
