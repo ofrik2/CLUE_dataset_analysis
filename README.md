@@ -16,6 +16,39 @@ The code is intentionally lightweight and meant as a starting point you can exte
 
 ---
 
+## Visual pipeline (overview)
+
+```mermaid
+flowchart TD
+  A["Signature file<br/>CSV/TSV<br/>gene_id numeric + score"] --> B["load_signature_table()"]
+  C["Pathway mapping<br/>CSV<br/>pathway to gene_ids"] --> D["load_pathway_mapping_csv()"]
+
+  B --> E["Rank genes by score"]
+  D --> E
+
+  F{"Direction"}
+  E --> F
+
+  F -->|pos|  G["Build hit vectors"]
+  F -->|neg|  H["Build hit vectors"]
+  F -->|both| I["Build hit vectors pos and neg"]
+
+  G --> J["alpha-RRA<br/>perm p-values"]
+  G --> K["XL-mHG"]
+  H --> J
+  H --> K
+  I --> J
+  I --> K
+
+  J --> L["Per-pathway results table<br/>direction pathway stats p-values ranks"]
+  K --> L
+  L --> M["Spearman rank correlation<br/>alpha-RRA vs XL-mHG"]
+  M --> N["Write outputs<br/>CSV results and JSON correlations"]
+
+```
+
+---
+
 ## Project layout
 
 - `config.json`: editable run configuration (committed to the repo)
@@ -37,15 +70,31 @@ From the repo root:
 PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.pipeline.cli --config config.json
 ```
 
-This runs the pipeline using the parameters in `config.json` and writes outputs if `output_*` paths are set.
+This runs the pipeline using the parameters in your config and writes outputs if `output_*` paths are set.
+
+If you install the package (e.g. `python -m pip install -e .`), you also get a console script:
+
+```bash
+clue-pathway-enrichment --config config.json
+```
 
 ---
 
 ## Configuration (`config.json`)
 
-A project-level `config.json` is included at the repo root and is meant to be edited.
+A project-level config is included at the repo root and is meant to be edited.
 
-### Example
+### Supported formats
+
+- **JSON** is preferred.
+- **TOML** is supported as a backward-compatible fallback.
+
+Config selection rules used by `load_pipeline_config()`:
+- `*.json` => JSON
+- `*.toml` => TOML
+- otherwise: it tries JSON first, then TOML
+
+### Example (JSON)
 
 ```json
 {
@@ -66,6 +115,24 @@ A project-level `config.json` is included at the repo root and is meant to be ed
 }
 ```
 
+### Example (TOML)
+
+```toml
+[pipeline]
+signature_path = "data/signature.tsv"
+pathway_csv = "data/pathways.csv"
+
+direction = "both"
+alpha = 0.2
+n_perm = 200
+seed = 0
+X = 1
+L = 100
+
+output_csv = "out/results.csv"
+output_spearman_json = "out/spearman.json"
+```
+
 ### Fields
 
 All fields live under the top-level key `pipeline`.
@@ -78,7 +145,7 @@ All fields live under the top-level key `pipeline`.
 - `pathway_csv` (string, **required**)
   Path to your pathway mapping file (CSV).
 
-> Note on relative paths: they’re interpreted relative to the **current working directory** when you run the command (typically the repo root).
+> Note on relative paths: they’re interpreted relative to the **current working directory** when you run the command.
 
 #### Run parameters
 
@@ -119,6 +186,10 @@ The config loader (`pipeline/config.py`) validates:
 
 ## Input file formats
 
+> Important: the pipeline supports gene **names** (symbols) as well as **numeric gene IDs**.  
+> The key requirement is **consistency**: the identifier format in `signature_path` must match the identifier format used in `pathway_csv` (both long format and summary lists).  
+> Example: if your signature uses numeric IDs (e.g., `2547`), the pathway members must also be numeric IDs (e.g., `[2547, 3159, ...]`).
+
 ### Signature file (`signature_path`)
 
 Loaded by `clue_pathway_enrichment.io.load_signature.load_signature_table`.
@@ -127,20 +198,20 @@ Supported formats:
 
 1) **Standard**: must include columns named `gene` and `score` (case-insensitive)
 
-Example TSV:
+Example TSV (numeric IDs):
 
 ```tsv
 gene	score
-TP53	1.2
-EGFR	-0.7
+2547	1.2
+1956	-0.7
 ```
 
 2) **CLUE-style**: must include column `gene_id` and exactly one other score column, e.g.:
 
 ```tsv
 gene_id	my_signature
-TP53	1.2
-EGFR	-0.7
+2547	1.2
+1956	-0.7
 ```
 
 If there’s more than one score column, you must extend the loader or pass a score column (the current pipeline doesn’t thread that option through yet).
@@ -160,18 +231,20 @@ Supported formats:
 
 ```csv
 pathway,gene
-Apoptosis,TP53
-Apoptosis,CASP3
-MAPK,EGFR
+Apoptosis,2547
+Apoptosis,836
+MAPK,1956
 ```
 
 2) **Summary format**: columns `pathway` and one of `genes` or `gene_ids`.
 That genes column can be a JSON/Python-like list string or a delimited string.
 
+Example (numeric IDs):
+
 ```csv
-pathway,genes
-Apoptosis,"['TP53','CASP3']"
-MAPK,"EGFR,KRAS,BRAF"
+pathway,gene_ids
+2-LTR Circle Formation R-HSA-164843,"[2547, 3159, 3981, 7518, 7520, 8815, 11168]"
+MAPK,"1956,3845,673"
 ```
 
 ---
@@ -182,13 +255,19 @@ MAPK,"EGFR,KRAS,BRAF"
 
 The CLI is implemented in `src/clue_pathway_enrichment/pipeline/cli.py`.
 
-Run:
+Run without installing:
 
 ```bash
 PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.pipeline.cli --config config.json
 ```
 
-Optional overrides (override whatever is in `config.json`):
+Run after installing (console script from `pyproject.toml`):
+
+```bash
+clue-pathway-enrichment --config config.json
+```
+
+Optional overrides (override whatever is in the config):
 
 ```bash
 PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.pipeline.cli \
@@ -237,6 +316,11 @@ results_df, spearman = run_from_config("config.json")
 ### Results table (`output_csv`)
 
 The pipeline returns a pandas `DataFrame` (and optionally writes it to CSV) with one row per tested `(direction, pathway)`.
+
+Notes:
+- Ranking is computed **within each direction separately**.
+- If a direction has no ranked genes, it’s skipped.
+- If a pathway has `K_hits == 0` (no overlap with the ranked list), it’s skipped.
 
 Columns include:
 - `direction`: `pos` or `neg`
@@ -289,9 +373,9 @@ python -m pip install -e .
 
 ### Config says files don’t exist
 
-`load_pipeline_config()` currently checks that `signature_path` and `pathway_csv` exist.
+`load_pipeline_config()` checks that `signature_path` and `pathway_csv` exist.
 Double-check:
-- paths in `config.json`
+- paths in your config
 - your working directory (relative paths are resolved from where you run the command)
 
 ---
