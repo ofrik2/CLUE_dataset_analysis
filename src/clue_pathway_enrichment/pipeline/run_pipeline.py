@@ -3,6 +3,7 @@ from typing import Optional
 import pandas as pd
 
 from clue_pathway_enrichment.io.load_signature import load_signature_table
+from clue_pathway_enrichment.io.load_signature import standardize_signature_df
 from clue_pathway_enrichment.io.load_pathways import load_pathway_mapping_csv
 from clue_pathway_enrichment.preprocessing.create_ranked_list import pathway_to_binary_vector
 from clue_pathway_enrichment.preprocessing.split_rank_signature import split_and_rank_signature
@@ -32,7 +33,7 @@ def _iter_with_progress(it, *, total: int, desc: str, enabled: bool):
 
 
 def run(
-    signature_path: str,
+    signature_path: str | pd.DataFrame,
     pathway_csv: str,
     direction: str = "both",   # "pos" | "neg" | "both"
     alpha: float = 0.2,
@@ -44,8 +45,14 @@ def run(
     output_spearman_plot_zoom: Optional[str] = None,  # e.g. "out/rank_agreement_top10pct_{direction}.png"
     spearman_plot_zoom_top_fraction: float = 0.1,
     show_progress: bool = True,
-) -> tuple[pd.DataFrame, dict[str, float]]:
-    sig = load_signature_table(signature_path)
+) -> tuple[pd.DataFrame, dict[str, float] | dict[str, dict[str, float]]]:
+    if isinstance(signature_path, str):
+        sig = load_signature_table(signature_path)
+    elif isinstance(signature_path, pd.DataFrame):
+        sig = standardize_signature_df(signature_path)
+    else:
+        raise TypeError(f"signature_path must be a str path or a pandas DataFrame, got: {type(signature_path)!r}")
+
     pathways = load_pathway_mapping_csv(pathway_csv)
 
     pos_ranked, neg_ranked = split_and_rank_signature(sig)
@@ -98,21 +105,25 @@ def run(
 
     # rank within each direction separately
     out = []
-    spearman_by_dir: dict[str, float] = {}
+    spearman_by_dir: dict[str, float] | dict[str, dict[str, float]] = {}
+
     for d in enabled:
         sub = res[res["direction"] == d].copy()
         if sub.empty:
             continue
         sub = add_ranks(sub, "alpha_rra_p", "rank_alpha_rra")
         sub = add_ranks(sub, "xlmhg_p", "rank_xlmhg")
-        spearman_by_dir[d] = spearman_between_ranks(sub, "rank_alpha_rra", "rank_xlmhg")
+        full_rho = spearman_between_ranks(sub, "rank_alpha_rra", "rank_xlmhg")
+
+        # If we end up computing zoom rho, we’ll promote the structure to nested dicts.
+        zoom_rho: Optional[float] = None
 
         if output_spearman_plot:
             plot_path = output_spearman_plot.format(direction=d)
             save_rank_agreement_plot(
                 sub,
                 direction=d,
-                spearman_rho=spearman_by_dir[d],
+                spearman_rho=full_rho,
                 out_path=plot_path,
             )
 
@@ -120,8 +131,6 @@ def run(
             plot_path = output_spearman_plot_zoom.format(direction=d)
 
             # Recompute Spearman on the same subset that will be shown in the zoom plot:
-            # top k% by min(rank_alpha_rra, rank_xlmhg) <= ceil(n * k)
-            zoom_rho = spearman_by_dir[d]
             zf = float(spearman_plot_zoom_top_fraction)
             if not (0.0 < zf <= 1.0):
                 raise ValueError(f"spearman_plot_zoom_top_fraction must be in (0, 1], got: {zf}")
@@ -132,10 +141,11 @@ def run(
                 tmp = sub[["rank_alpha_rra", "rank_xlmhg"]].copy()
                 tmp["__min_rank__"] = tmp[["rank_alpha_rra", "rank_xlmhg"]].min(axis=1)
                 zoom_sub = sub.loc[tmp["__min_rank__"] <= zoom_n]
-                if len(zoom_sub) >= 2:
-                    zoom_rho = spearman_between_ranks(zoom_sub, "rank_alpha_rra", "rank_xlmhg")
-                else:
-                    zoom_rho = float("nan")
+                zoom_rho = (
+                    spearman_between_ranks(zoom_sub, "rank_alpha_rra", "rank_xlmhg")
+                    if len(zoom_sub) >= 2
+                    else float("nan")
+                )
             else:
                 zoom_rho = float("nan")
 
@@ -146,6 +156,20 @@ def run(
                 out_path=plot_path,
                 zoom_top_fraction=spearman_plot_zoom_top_fraction,
             )
+
+        # Store return values
+        if zoom_rho is None:
+            # keep old behavior: dict[str, float]
+            if isinstance(spearman_by_dir, dict) and (not spearman_by_dir or isinstance(next(iter(spearman_by_dir.values()), 0.0), float)):
+                spearman_by_dir[d] = full_rho  # type: ignore[index]
+            else:
+                # already promoted
+                spearman_by_dir[d] = {"full": full_rho}  # type: ignore[index]
+        else:
+            # promote to nested dict if needed
+            if spearman_by_dir and isinstance(next(iter(spearman_by_dir.values())), float):  # type: ignore[arg-type]
+                spearman_by_dir = {k: {"full": v} for k, v in spearman_by_dir.items()}  # type: ignore[assignment]
+            spearman_by_dir[d] = {"full": full_rho, "top_k": zoom_rho}  # type: ignore[index]
 
         out.append(sub)
 

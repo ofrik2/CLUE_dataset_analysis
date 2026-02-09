@@ -325,7 +325,13 @@ results_df, spearman = run(
     seed=0,
     X=1,
     L=100,
+    output_spearman_plot_zoom="out/rank_agreement_zoom_{direction}.png",
+    spearman_plot_zoom_top_fraction=0.1,
 )
+
+# spearman is:
+# - {"pos": rho, "neg": rho} if zoom isn't computed
+# - {"pos": {"full": rho, "top_k": rho_topk}, "neg": {"full": rho, "top_k": rho_topk}} if zoom subset rho was computed
 ```
 
 Or using the config helper:
