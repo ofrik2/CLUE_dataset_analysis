@@ -23,7 +23,42 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--output-csv", default=None, help="Write result table to CSV (overrides config)")
     p.add_argument("--output-spearman-json", default=None, help="Write Spearman dict to JSON (overrides config)")
+    p.add_argument(
+        "--output-spearman-plot",
+        default=None,
+        help=(
+            "Write a rank-agreement plot (rank_alpha_rra vs rank_xlmhg) as an image (overrides config). "
+            "If direction=both, writes one file per direction by appending '.pos' / '.neg' before the extension."
+        ),
+    )
+    p.add_argument(
+        "--output-spearman-plot-zoom",
+        default=None,
+        help=(
+            "Write an additional zoomed-in rank-agreement plot focusing on the top fraction of ranks (overrides config). "
+            "If direction=both, writes one file per direction by appending '.pos' / '.neg' before the extension."
+        ),
+    )
+    p.add_argument(
+        "--spearman-plot-zoom-top-fraction",
+        type=float,
+        default=None,
+        help="Top fraction for zoomed plot (0 < f <= 1). Default: 0.1 (top 10%).",
+    )
+
+    p.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the per-pathway progress bar / ETA.",
+    )
     return p
+
+
+def _with_dir_suffix(path: str, direction: str) -> str:
+    p = Path(path)
+    if p.suffix:
+        return str(p.with_name(f"{p.stem}.{direction}{p.suffix}"))
+    return str(p.with_name(f"{p.name}.{direction}"))
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -42,6 +77,21 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     output_csv = args.output_csv if args.output_csv is not None else cfg.output_csv
     output_spearman = args.output_spearman_json if args.output_spearman_json is not None else cfg.output_spearman_json
+    output_spearman_plot = (
+        args.output_spearman_plot if args.output_spearman_plot is not None else cfg.output_spearman_plot
+    )
+    output_spearman_plot_zoom = (
+        args.output_spearman_plot_zoom
+        if args.output_spearman_plot_zoom is not None
+        else getattr(cfg, "output_spearman_plot_zoom", None)
+    )
+    spearman_plot_zoom_top_fraction = (
+        args.spearman_plot_zoom_top_fraction
+        if args.spearman_plot_zoom_top_fraction is not None
+        else float(getattr(cfg, "spearman_plot_zoom_top_fraction", 0.1))
+    )
+
+    show_progress = (not args.no_progress) and bool(getattr(cfg, "show_progress", True))
 
     res_df, spearman_by_dir = run(
         signature_path=cfg.signature_path,
@@ -52,6 +102,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         seed=seed,
         X=X,
         L=L,
+        output_spearman_plot=output_spearman_plot,  # <-- wire through
+        output_spearman_plot_zoom=output_spearman_plot_zoom,
+        spearman_plot_zoom_top_fraction=spearman_plot_zoom_top_fraction,
+        show_progress=show_progress,
     )
 
     if output_csv:
@@ -61,6 +115,48 @@ def main(argv: Optional[list[str]] = None) -> int:
     if output_spearman:
         Path(output_spearman).parent.mkdir(parents=True, exist_ok=True)
         Path(output_spearman).write_text(json.dumps(spearman_by_dir, indent=2, sort_keys=True))
+
+    # (Re-)create plots from the final result DF so CLI can suffix per-direction filenames.
+    if output_spearman_plot or output_spearman_plot_zoom:
+        from clue_pathway_enrichment.analysis.visualization import save_rank_agreement_plot
+
+        # Determine which directions are actually present in results to avoid empty plots.
+        if "direction" in res_df.columns:
+            dirs = sorted(set(res_df["direction"].dropna().astype(str)))
+        else:
+            dirs = []
+
+        # If run returned nothing, still create a single empty plot for the requested direction.
+        if not dirs:
+            dirs = [direction] if direction != "both" else ["pos", "neg"]
+
+        for d in dirs:
+            if output_spearman_plot:
+                if len(dirs) == 1:
+                    out_path = output_spearman_plot
+                else:
+                    out_path = _with_dir_suffix(output_spearman_plot, d)
+
+                save_rank_agreement_plot(
+                    res_df,
+                    direction=d,
+                    spearman_rho=spearman_by_dir.get(d),
+                    out_path=out_path,
+                )
+
+            if output_spearman_plot_zoom:
+                if len(dirs) == 1:
+                    out_path = output_spearman_plot_zoom
+                else:
+                    out_path = _with_dir_suffix(output_spearman_plot_zoom, d)
+
+                save_rank_agreement_plot(
+                    res_df,
+                    direction=d,
+                    spearman_rho=spearman_by_dir.get(d),
+                    out_path=out_path,
+                    zoom_top_fraction=spearman_plot_zoom_top_fraction,
+                )
 
     # also print a tiny summary for interactive use
     print(f"rows={len(res_df)}")

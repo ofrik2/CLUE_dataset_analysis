@@ -51,3 +51,4 @@ def load_signature_table(path: str, score_col: Optional[str] = None) -> pd.DataF
     out["score"] = pd.to_numeric(out["score"], errors="coerce")
     out = out.dropna(subset=["gene", "score"])
     return out
+

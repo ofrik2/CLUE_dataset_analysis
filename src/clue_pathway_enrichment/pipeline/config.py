@@ -27,7 +27,10 @@ class PipelineConfig:
         "X": 1,
         "L": 100,
         "output_csv": "results.csv",
-        "output_spearman_json": "spearman.json"
+        "output_spearman_json": "spearman.json",
+        "output_spearman_plot": "spearman.png",
+        "output_spearman_plot_zoom": "spearman.top10pct.png",
+        "spearman_plot_zoom_top_fraction": 0.1
       }
     }
     ```
@@ -47,6 +50,14 @@ class PipelineConfig:
 
     output_csv: Optional[str] = None
     output_spearman_json: Optional[str] = None
+    output_spearman_plot: Optional[str] = None
+
+    # extra (zoomed) rank agreement plot
+    output_spearman_plot_zoom: Optional[str] = None
+    spearman_plot_zoom_top_fraction: float = 0.1
+
+    # UX / logging
+    show_progress: bool = True
 
     def validate(self) -> None:
         if self.direction not in _ALLOWED_DIRECTIONS:
@@ -59,6 +70,10 @@ class PipelineConfig:
             raise ValueError(f"X must be >= 1, got: {self.X}")
         if self.L < 1:
             raise ValueError(f"L must be >= 1, got: {self.L}")
+        if not (0 < float(self.spearman_plot_zoom_top_fraction) <= 1):
+            raise ValueError(
+                f"spearman_plot_zoom_top_fraction must be in (0, 1], got: {self.spearman_plot_zoom_top_fraction}"
+            )
 
         sp = Path(self.signature_path)
         pc = Path(self.pathway_csv)
@@ -140,6 +155,14 @@ def load_pipeline_config(path: Union[str, Path]) -> PipelineConfig:
         output_spearman_json=(
             str(table["output_spearman_json"]) if table.get("output_spearman_json") is not None else None
         ),
+        output_spearman_plot=(
+            str(table["output_spearman_plot"]) if table.get("output_spearman_plot") is not None else None
+        ),
+        output_spearman_plot_zoom=(
+            str(table["output_spearman_plot_zoom"]) if table.get("output_spearman_plot_zoom") is not None else None
+        ),
+        spearman_plot_zoom_top_fraction=float(table.get("spearman_plot_zoom_top_fraction", 0.1)),
+        show_progress=bool(table.get("show_progress", True)),
     )
     cfg.validate()
     return cfg

@@ -8,9 +8,14 @@
     "n_perm": 200,
     "seed": 0,
     "X": 1,
-    "L": 100,
+    "L": 2466,
 
     "output_csv": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/results.csv",
-    "output_spearman_json": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman.json"
+    "output_spearman_json": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman.json",
+    "output_spearman_plot": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman.png",
+    "output_spearman_plot_zoom": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman_top10pct.png",
+    "spearman_plot_zoom_top_fraction": 0.1,
+
+    "show_progress": true
   }
 }

@@ -110,7 +110,8 @@ Config selection rules used by `load_pipeline_config()`:
     "L": 100,
 
     "output_csv": "out/results.csv",
-    "output_spearman_json": "out/spearman.json"
+    "output_spearman_json": "out/spearman.json",
+    "output_spearman_plot": "out/rank_agreement.png"
   }
 }
 ```
@@ -131,6 +132,7 @@ L = 100
 
 output_csv = "out/results.csv"
 output_spearman_json = "out/spearman.json"
+output_spearman_plot = "out/rank_agreement.png"
 ```
 
 ### Fields
@@ -174,6 +176,31 @@ All fields live under the top-level key `pipeline`.
 
 - `output_spearman_json` (string or null)
   If set, the CLI writes a small JSON object with Spearman correlations between the two ranking methods.
+
+- `output_spearman_plot` (string or null)
+  If set, writes a rank-agreement scatter plot (`rank_alpha_rra` vs `rank_xlmhg`) per direction.
+
+  Notes:
+  - If `direction="both"`, `run_pipeline.run()` expects a template like `out/rank_agreement_{direction}.png`
+    (it will format `{direction}` as `pos`/`neg`).
+  - The CLI also supports a single filename and will write one file per direction by inserting `.pos` / `.neg`
+    before the extension.
+
+- `output_spearman_plot_zoom` (string or null)
+  If set, writes an **additional** rank-agreement scatter plot that zooms in on the best-ranked pathways.
+
+  By default, it plots the **top 10%** of pathways by rank (see `spearman_plot_zoom_top_fraction`).
+
+  Notes:
+  - Same filename rules as `output_spearman_plot`:
+    - `run_pipeline.run()` expects a `{direction}` template when `direction="both"`
+    - the CLI will suffix `.pos` / `.neg` when `direction="both"`
+
+- `spearman_plot_zoom_top_fraction` (float, default: `0.1`)
+  Top fraction of ranks to include in the zoom plot (`0 < f <= 1`).
+
+  The zoom subset is defined as pathways where `min(rank_alpha_rra, rank_xlmhg) <= ceil(n * f)`.
+
 
 ### Validation behavior
 
