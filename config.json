@@ -1,21 +1,48 @@
 {
   "pipeline": {
-    "signature_path": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/signatures/ASG002_A549_24H_J20.csv",
-    "pathway_csv": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/metadata/pathway_summary_msigdb_reactome.csv",
-
-    "direction": "both",
+    "pathway_csv": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/metadata/pathway_summary_msigdb_reactome.csv",
+    "direction": "pos",
     "alpha": 0.2,
     "n_perm": 200,
     "seed": 0,
     "X": 1,
     "L": 2466,
 
-    "output_csv": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/results.csv",
-    "output_spearman_json": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman.json",
-    "output_spearman_plot": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman.png",
-    "output_spearman_plot_zoom": "/Users/ofrikutchinsky/Desktop/Thesis/datasets/results/spearman_top10pct.png",
     "spearman_plot_zoom_top_fraction": 0.1,
-
     "show_progress": true
+  },
+
+  "single_run": {
+    "signature_path": "...",
+    "output_dir": "...",
+    "output_csv": "...",
+    "output_spearman_json": "...",
+    "output_spearman_plot": "...",
+    "output_spearman_plot_zoom": "..."
+  },
+
+  "batch": {
+    "signature_store": {
+      "type": "zarr",
+      "path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/signatures_v2.zarr"
+    },
+    "sig_ids_path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/sig_ids.txt",
+
+    "threshold": 0.8,
+    "threshold_metric": "min_all",
+    "top_fractions": [0.1],
+
+    "outputs": {
+      "summary_path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/batch_results/batch_summary.parquet",
+      "hits_dir": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/batch_results/batch_hits",
+      "save_artifacts_for_hits": true
+    },
+
+    "execution": {
+      "resume": true,
+      "max_signatures": null,
+      "n_workers": 1,
+      "chunk_size": 50
+    }
   }
 }

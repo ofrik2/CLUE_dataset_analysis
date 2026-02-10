@@ -1,4 +1,4 @@
-# CLUE Pathway Enrichment (skeleton / reference implementation)
+# CLUE Pathway Enrichment
 
 This repository contains a small Python package, `clue_pathway_enrichment`, that runs a simple **pathway enrichment** analysis on a CLUE-style gene signature.
 
@@ -16,39 +16,6 @@ The code is intentionally lightweight and meant as a starting point you can exte
 
 ---
 
-## Visual pipeline (overview)
-
-```mermaid
-flowchart TD
-  A["Signature file<br/>CSV/TSV<br/>gene_id numeric + score"] --> B["load_signature_table()"]
-  C["Pathway mapping<br/>CSV<br/>pathway to gene_ids"] --> D["load_pathway_mapping_csv()"]
-
-  B --> E["Rank genes by score"]
-  D --> E
-
-  E --> F{Direction}
-
-  F -->|pos|G["Build hit vectors"]
-  F -->|neg|H["Build hit vectors"]
-  F -->|both|I["Build hit vectors pos and neg"]
-
-  G --> J["alpha-RRA<br/>perm p-values"]
-  G --> K["XL-mHG"]
-  H --> J
-  H --> K
-  I --> J
-  I --> K
-
-  J --> L["Per-pathway results table<br/>direction pathway stats p-values ranks"]
-  K --> L
-  L --> M["Spearman rank correlation<br/>alpha-RRA vs XL-mHG"]
-  M --> N["Write outputs<br/>CSV results and JSON correlations"]
-
-
-```
-
----
-
 ## Project layout
 
 - `config.json`: editable run configuration (committed to the repo)
@@ -56,13 +23,13 @@ flowchart TD
   - `io/`: reading signature/pathway files
   - `preprocessing/`: ranking / splitting / hit vectors
   - `methods/`: alpha-RRA and XL-mHG wrappers
-  - `analysis/`: ranking utilities and correlations
+  - `analysis/`: ranking utilities and correlations (+ plotting)
   - `pipeline/`: orchestration (`run_pipeline.py`), config/CLI
-- `tests/`: small unit/integration tests
+- `tests/`: unit/integration tests
 
 ---
 
-## Quick start (no install)
+## Quick start (single run)
 
 From the repo root:
 
@@ -70,86 +37,50 @@ From the repo root:
 PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.pipeline.cli --config config.json
 ```
 
-This runs the pipeline using the parameters in your config and writes outputs if `output_*` paths are set.
-
 If you install the package (e.g. `python -m pip install -e .`), you also get a console script:
 
 ```bash
 clue-pathway-enrichment --config config.json
 ```
 
+You can also run the module after an editable install:
+
+```bash
+python -m clue_pathway_enrichment.pipeline.cli --config config.json
+```
+
 ---
 
 ## Configuration (`config.json`)
-
-A project-level config is included at the repo root and is meant to be edited.
 
 ### Supported formats
 
 - **JSON** is preferred.
 - **TOML** is supported as a backward-compatible fallback.
 
-Config selection rules used by `load_pipeline_config()`:
+Config selection rules used by the loaders in `pipeline/config.py`:
 - `*.json` => JSON
 - `*.toml` => TOML
 - otherwise: it tries JSON first, then TOML
 
-### Example (JSON)
+### Top-level structure
 
-```json
-{
-  "pipeline": {
-    "signature_path": "data/signature.tsv",
-    "pathway_csv": "data/pathways.csv",
+The repo’s config is structured into three top-level sections:
 
-    "direction": "both",
-    "alpha": 0.2,
-    "n_perm": 200,
-    "seed": 0,
-    "X": 1,
-    "L": 100,
+- `pipeline`: shared algorithm parameters (used by both single-run and batch).
+- `single_run`: single-signature inputs/outputs (used by `pipeline/cli.py`).
+- `batch`: batch execution inputs/outputs (used by the batch runner).
 
-    "output_csv": "out/results.csv",
-    "output_spearman_json": "out/spearman.json",
-    "output_spearman_plot": "out/rank_agreement.png"
-  }
-}
-```
+---
 
-### Example (TOML)
+## Single run
 
-```toml
-[pipeline]
-signature_path = "data/signature.tsv"
-pathway_csv = "data/pathways.csv"
+### `pipeline` section (shared params)
 
-direction = "both"
-alpha = 0.2
-n_perm = 200
-seed = 0
-X = 1
-L = 100
-
-output_csv = "out/results.csv"
-output_spearman_json = "out/spearman.json"
-output_spearman_plot = "out/rank_agreement.png"
-```
-
-### Fields
-
-All fields live under the top-level key `pipeline`.
-
-#### Inputs
-
-- `signature_path` (string, **required**)
-  Path to your signature file (CSV or TSV).
+Fields:
 
 - `pathway_csv` (string, **required**)
   Path to your pathway mapping file (CSV).
-
-> Note on relative paths: they’re interpreted relative to the **current working directory** when you run the command.
-
-#### Run parameters
 
 - `direction` (string, default: `"both"`)
   One of: `"pos"`, `"neg"`, `"both"`.
@@ -158,7 +89,7 @@ All fields live under the top-level key `pipeline`.
   alpha-RRA parameter. Must be in `(0, 1)`.
 
 - `n_perm` (int, default: `200`)
-  Number of permutations for alpha-RRA p-value estimation. Use `0` for a fast “no permutations” run (if your wrapper supports it).
+  Number of permutations for alpha-RRA p-value estimation. Use `0` for a fast “no permutations” run.
 
 - `seed` (int or null, default: `0`)
   Random seed for alpha-RRA permutations. Use `null` for non-deterministic.
@@ -169,69 +100,68 @@ All fields live under the top-level key `pipeline`.
 - `L` (int, default: `100`)
   XL-mHG parameter.
 
-#### Outputs
+- `spearman_plot_zoom_top_fraction` (float, default: `0.1`)
+  Top fraction of ranks to include in the zoom plot (`0 < f <= 1`).
+
+  The zoom subset is defined as pathways where:
+  `min(rank_alpha_rra, rank_xlmhg) <= ceil(n * f)`.
+
+- `show_progress` (bool, default: `true`)
+  If `true`, show a tqdm progress bar with ETA during the per-pathway scoring loop.
+
+### `single_run` section (inputs/outputs)
+
+Fields:
+
+- `signature_path` (string, **required**)
+  Path to your signature file (CSV or TSV).
+
+- `output_dir` (string, optional)
+  Optional convenience field (not required by the core pipeline). If you use it,
+  you can put outputs under this folder in your own wrapper code.
 
 - `output_csv` (string or null)
   If set, the CLI writes the main results table to CSV.
 
 - `output_spearman_json` (string or null)
-  If set, the CLI writes a small JSON object with Spearman correlations between the two ranking methods.
+  If set, the CLI writes Spearman correlations as JSON.
 
 - `output_spearman_plot` (string or null)
-  If set, writes a rank-agreement scatter plot (`rank_alpha_rra` vs `rank_xlmhg`) per direction.
-
-  Notes:
-  - If `direction="both"`, `run_pipeline.run()` expects a template like `out/rank_agreement_{direction}.png`
-    (it will format `{direction}` as `pos`/`neg`).
-  - The CLI also supports a single filename and will write one file per direction by inserting `.pos` / `.neg`
-    before the extension.
+  If set, writes a rank-agreement scatter plot (`rank_alpha_rra` vs `rank_xlmhg`).
 
 - `output_spearman_plot_zoom` (string or null)
-  If set, writes an **additional** rank-agreement scatter plot that zooms in on the best-ranked pathways.
+  If set, writes an **additional** rank-agreement plot zoomed into the top fraction.
 
-  By default, it plots the **top 10%** of pathways by rank (see `spearman_plot_zoom_top_fraction`).
+  Notes on filenames:
+  - If `direction="both"`, the CLI writes one file per direction by inserting `.pos` / `.neg`
+    before the file extension.
 
-  Notes:
-  - Same filename rules as `output_spearman_plot`:
-    - `run_pipeline.run()` expects a `{direction}` template when `direction="both"`
-    - the CLI will suffix `.pos` / `.neg` when `direction="both"`
+### Spearman output structure
 
-- `spearman_plot_zoom_top_fraction` (float, default: `0.1`)
-  Top fraction of ranks to include in the zoom plot (`0 < f <= 1`).
+The return value `spearman_by_dir` from `pipeline/run_pipeline.run()` can have two shapes:
 
-  The zoom subset is defined as pathways where `min(rank_alpha_rra, rank_xlmhg) <= ceil(n * f)`.
+- If only the full-list Spearman is computed:
+  - `{ "pos": <rho>, "neg": <rho> }`
 
+- If the zoom plot is requested and the zoom Spearman is computed on the zoom subset:
+  - `{ "pos": {"full": <rho>, "top_k": <rho_topk>}, "neg": {"full": <rho>, "top_k": <rho_topk>} }`
 
-### Validation behavior
-
-The config loader (`pipeline/config.py`) validates:
-- `direction` is one of `pos|neg|both`
-- numeric bounds for `alpha`, `n_perm`, `X`, `L`
-- **input files exist** at the given paths
+`top_k` is the Spearman correlation recomputed on the same subset that is shown in the zoom plot.
 
 ---
 
 ## Input file formats
 
-> Important: the pipeline supports gene **names** (symbols) as well as **numeric gene IDs**.  
-> The key requirement is **consistency**: the identifier format in `signature_path` must match the identifier format used in `pathway_csv` (both long format and summary lists).  
-> Example: if your signature uses numeric IDs (e.g., `2547`), the pathway members must also be numeric IDs (e.g., `[2547, 3159, ...]`).
+> Important: the pipeline supports gene **names** (symbols) as well as **numeric gene IDs**.
+> The key requirement is **consistency**: the identifier format in the signature must match the identifier format used in `pathway_csv`.
 
-### Signature file (`signature_path`)
+### Signature file (`single_run.signature_path`)
 
 Loaded by `clue_pathway_enrichment.io.load_signature.load_signature_table`.
 
 Supported formats:
 
 1) **Standard**: must include columns named `gene` and `score` (case-insensitive)
-
-Example TSV (numeric IDs):
-
-```tsv
-gene	score
-2547	1.2
-1956	-0.7
-```
 
 2) **CLUE-style**: must include column `gene_id` and exactly one other score column, e.g.:
 
@@ -241,14 +171,12 @@ gene_id	my_signature
 1956	-0.7
 ```
 
-If there’s more than one score column, you must extend the loader or pass a score column (the current pipeline doesn’t thread that option through yet).
-
 The loader:
 - trims gene strings
 - coerces score to numeric
 - drops rows with missing/invalid gene or score
 
-### Pathway mapping file (`pathway_csv`)
+### Pathway mapping file (`pipeline.pathway_csv`)
 
 Loaded by `clue_pathway_enrichment.io.load_pathways.load_pathway_mapping_csv`.
 
@@ -256,106 +184,106 @@ Supported formats:
 
 1) **Long format**: columns `pathway` and `gene` (one row per member gene)
 
-```csv
-pathway,gene
-Apoptosis,2547
-Apoptosis,836
-MAPK,1956
-```
-
 2) **Summary format**: columns `pathway` and one of `genes` or `gene_ids`.
-That genes column can be a JSON/Python-like list string or a delimited string.
-
-Example (numeric IDs):
-
-```csv
-pathway,gene_ids
-2-LTR Circle Formation R-HSA-164843,"[2547, 3159, 3981, 7518, 7520, 8815, 11168]"
-MAPK,"1956,3845,673"
-```
 
 ---
 
 ## Running
 
-### CLI
+### CLI (single run)
 
 The CLI is implemented in `src/clue_pathway_enrichment/pipeline/cli.py`.
-
-Run without installing:
 
 ```bash
 PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.pipeline.cli --config config.json
 ```
 
-Run after installing (console script from `pyproject.toml`):
-
-```bash
-clue-pathway-enrichment --config config.json
-```
-
-Optional overrides (override whatever is in the config):
-
-```bash
-PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.pipeline.cli \
-  --config config.json \
-  --direction pos \
-  --alpha 0.1 \
-  --n-perm 500 \
-  --seed 123 \
-  --X 1 \
-  --L 200 \
-  --output-csv out/custom.csv \
-  --output-spearman-json out/custom_spearman.json
-```
+Useful CLI flags:
+- `--output-csv`, `--output-spearman-json`, `--output-spearman-plot`, `--output-spearman-plot-zoom`
+- `--spearman-plot-zoom-top-fraction`
+- `--no-progress`
 
 ### Python API
 
-The main entry points live in `pipeline/run_pipeline.py`.
+The main entry point is `clue_pathway_enrichment.pipeline.run_pipeline.run`.
 
 ```python
+import pandas as pd
 from clue_pathway_enrichment.pipeline.run_pipeline import run
 
+# You can pass a path...
 results_df, spearman = run(
     signature_path="data/signature.tsv",
     pathway_csv="data/pathways.csv",
     direction="both",
-    alpha=0.2,
-    n_perm=200,
-    seed=0,
-    X=1,
-    L=100,
-    output_spearman_plot_zoom="out/rank_agreement_zoom_{direction}.png",
-    spearman_plot_zoom_top_fraction=0.1,
 )
 
-# spearman is:
-# - {"pos": rho, "neg": rho} if zoom isn't computed
-# - {"pos": {"full": rho, "top_k": rho_topk}, "neg": {"full": rho, "top_k": rho_topk}} if zoom subset rho was computed
+# ...or an in-memory DataFrame (must match the signature formats described above):
+# - columns (gene, score) OR
+# - columns (gene_id, <one score col>)
+#
+# The pipeline will standardize it internally.
+sig_df = pd.DataFrame({"gene": ["A", "B"], "score": [1.0, -1.0]})
+results_df2, spearman2 = run(signature_path=sig_df, pathway_csv="data/pathways.csv")
+```
+### CLI (batch run)
+
+Batch execution is implemented in `src/clue_pathway_enrichment/batch/cli.py`.
+
+From the repo root, run without installing:
+
+```bash
+PYTHONPATH=$PWD/src python3 -m clue_pathway_enrichment.batch.cli --config config.json
 ```
 
-Or using the config helper:
+After an editable install (`python -m pip install -e .`), run:
 
-```python
-from clue_pathway_enrichment.pipeline.run_pipeline import run_from_config
-
-results_df, spearman = run_from_config("config.json")
+```bash
+python -m clue_pathway_enrichment.batch.cli --config config.json
 ```
+
+> Note: there currently isn’t a dedicated `clue-pathway-enrichment-batch` console script in `pyproject.toml`.
+> If you want one, we can add it under `[project.scripts]`.
+
+---
+
+## Batch mode
+
+Batch mode is configured under the top-level `batch` key in `config.json`.
+
+What it typically does:
+
+1. Loads signatures from `batch.signature_store` (e.g. a zarr store).
+2. Iterates `sig_ids_path`.
+3. Runs the same per-signature pathway enrichment as the single-run pipeline.
+4. Writes a summary table to `batch.outputs.summary_path`.
+5. Optionally writes per-hit artifacts under `batch.outputs.hits_dir` (if enabled).
+
+### (Optional) Resume / limits
+
+Use the config fields:
+
+- `batch.execution.resume` to resume from existing outputs when supported
+- `batch.execution.max_signatures` to cap the run during debugging
+- `batch.execution.n_workers` and `batch.execution.chunk_size` to control throughput
+
+### Progress bar / ETA
+
+Batch runs show a progress bar with ETA by default (requires `tqdm`).
+
+Control it via:
+- `batch.execution.show_progress` (bool) in `config.json`
+- `--no-progress` flag in the batch CLI
 
 ---
 
 ## Output
 
-### Results table (`output_csv`)
+### Results table (`single_run.output_csv`)
 
 The pipeline returns a pandas `DataFrame` (and optionally writes it to CSV) with one row per tested `(direction, pathway)`.
 
-Notes:
-- Ranking is computed **within each direction separately**.
-- If a direction has no ranked genes, it’s skipped.
-- If a pathway has `K_hits == 0` (no overlap with the ranked list), it’s skipped.
-
-Columns include:
+Columns typically include:
 - `direction`: `pos` or `neg`
 - `pathway`: pathway name
 - `K_hits`: number of hits for that pathway in the ranked list
@@ -365,25 +293,13 @@ Columns include:
 - `rank_alpha_rra`: rank of `alpha_rra_p` (lower p-value = better rank)
 - `rank_xlmhg`: rank of `xlmhg_p`
 
-### Spearman correlations (`output_spearman_json`)
-
-A small dict: `{ "pos": <rho>, "neg": <rho> }` for directions that were run.
-
 ---
 
 ## Testing
 
-If you can install dependencies in your environment:
-
 ```bash
 python -m pip install -r requirements.txt
 python -m pytest -q
-```
-
-If you *can’t* do editable installs, you can still run tests by pointing `PYTHONPATH` at `src`:
-
-```bash
-PYTHONPATH=$PWD/src python -m pytest -q
 ```
 
 ---
@@ -392,30 +308,20 @@ PYTHONPATH=$PWD/src python -m pytest -q
 
 ### Import errors (package not found)
 
-If you see `ModuleNotFoundError: clue_pathway_enrichment`, run with:
-
 ```bash
 PYTHONPATH=$PWD/src ...
 ```
 
-or install in editable mode:
-
-```bash
-python -m pip install -e .
-```
-
 ### Config says files don’t exist
 
-`load_pipeline_config()` checks that `signature_path` and `pathway_csv` exist.
-Double-check:
-- paths in your config
-- your working directory (relative paths are resolved from where you run the command)
+`load_pipeline_config()` validates `pipeline.pathway_csv` exists.
+`load_single_run_config()` validates `single_run.signature_path` exists (or falls back to `pipeline.signature_path` for legacy configs).
 
 ---
 
 ## Notes / next steps
 
-This repo is a starting point. Common extensions:
-- Add support for selecting the CLUE signature score column in the config.
-- Add multiple-testing correction (FDR/q-values).
-- Add richer outputs (top-N per direction, plots, etc.).
+Common extensions:
+- multiple-testing correction (FDR/q-values)
+- richer batch analytics and reporting
+- support selecting a score column for CLUE-style signatures with multiple score columns

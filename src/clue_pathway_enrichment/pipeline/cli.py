@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from clue_pathway_enrichment.pipeline.config import load_pipeline_config
+from clue_pathway_enrichment.pipeline.config import load_pipeline_config, load_single_run_config
 from clue_pathway_enrichment.pipeline.run_pipeline import run
 
 
@@ -65,37 +65,38 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    cfg = load_pipeline_config(args.config)
+    pipe_cfg = load_pipeline_config(args.config)
+    single_cfg = load_single_run_config(args.config)
 
     # merge overrides
-    direction = args.direction if args.direction is not None else cfg.direction
-    alpha = args.alpha if args.alpha is not None else cfg.alpha
-    n_perm = args.n_perm if args.n_perm is not None else cfg.n_perm
-    seed = args.seed if args.seed is not None else cfg.seed
-    X = args.X if args.X is not None else cfg.X
-    L = args.L if args.L is not None else cfg.L
+    direction = args.direction if args.direction is not None else pipe_cfg.direction
+    alpha = args.alpha if args.alpha is not None else pipe_cfg.alpha
+    n_perm = args.n_perm if args.n_perm is not None else pipe_cfg.n_perm
+    seed = args.seed if args.seed is not None else pipe_cfg.seed
+    X = args.X if args.X is not None else pipe_cfg.X
+    L = args.L if args.L is not None else pipe_cfg.L
 
-    output_csv = args.output_csv if args.output_csv is not None else cfg.output_csv
-    output_spearman = args.output_spearman_json if args.output_spearman_json is not None else cfg.output_spearman_json
+    output_csv = args.output_csv if args.output_csv is not None else single_cfg.output_csv
+    output_spearman = args.output_spearman_json if args.output_spearman_json is not None else single_cfg.output_spearman_json
     output_spearman_plot = (
-        args.output_spearman_plot if args.output_spearman_plot is not None else cfg.output_spearman_plot
+        args.output_spearman_plot if args.output_spearman_plot is not None else single_cfg.output_spearman_plot
     )
     output_spearman_plot_zoom = (
         args.output_spearman_plot_zoom
         if args.output_spearman_plot_zoom is not None
-        else getattr(cfg, "output_spearman_plot_zoom", None)
+        else getattr(single_cfg, "output_spearman_plot_zoom", None)
     )
     spearman_plot_zoom_top_fraction = (
         args.spearman_plot_zoom_top_fraction
         if args.spearman_plot_zoom_top_fraction is not None
-        else float(getattr(cfg, "spearman_plot_zoom_top_fraction", 0.1))
+        else float(getattr(single_cfg, "spearman_plot_zoom_top_fraction", 0.1))
     )
 
-    show_progress = (not args.no_progress) and bool(getattr(cfg, "show_progress", True))
+    show_progress = (not args.no_progress) and bool(getattr(pipe_cfg, "show_progress", True))
 
     res_df, spearman_by_dir = run(
-        signature_path=cfg.signature_path,
-        pathway_csv=cfg.pathway_csv,
+        signature_path=single_cfg.signature_path,
+        pathway_csv=single_cfg.pathway_csv,
         direction=direction,
         alpha=alpha,
         n_perm=n_perm,
