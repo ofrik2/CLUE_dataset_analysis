@@ -86,11 +86,28 @@ def save_rank_agreement_plot(
     if title is None:
         bits = [f"Rank agreement ({direction})"]
         if zoom_top_fraction is not None:
-            bits.append(f"zoom top={zoom_top_fraction:.0%}" if zoom_n is None else f"zoom top={zoom_top_fraction:.0%} (≤{zoom_n})")
-        if spearman_rho is not None:
-            bits.append(f"Spearman ρ={spearman_rho:.3f}")
+            bits.append(
+                f"zoom top={zoom_top_fraction:.0%}"
+                if zoom_n is None
+                else f"zoom top={zoom_top_fraction:.0%} (≤{zoom_n})"
+            )
+
+        # --- FIX: allow spearman_rho to be float OR dict keyed by direction ---
+        rho_val = spearman_rho
+        if isinstance(rho_val, dict):
+            rho_val = rho_val.get(direction)
+
+        if rho_val is not None:
+            try:
+                bits.append(f"Spearman ρ={float(rho_val):.3f}")
+            except (TypeError, ValueError):
+                # If it's something weird (e.g., list/object), skip formatting
+                pass
+        # --- end fix ---
+
         bits.append(f"n={len(sub)}")
         title = " | ".join(bits)
+
 
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(x, y, s=point_size, alpha=0.7, edgecolors="none")

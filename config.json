@@ -1,9 +1,9 @@
 {
   "pipeline": {
     "pathway_csv": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/metadata/pathway_summary_msigdb_reactome.csv",
-    "direction": "pos",
+    "direction": "both",
     "alpha": 0.2,
-    "n_perm": 200,
+    "n_perm": 10000,
     "seed": 0,
     "X": 1,
     "L": 2466,
@@ -13,12 +13,12 @@
   },
 
   "single_run": {
-    "signature_path": "...",
-    "output_dir": "...",
-    "output_csv": "...",
-    "output_spearman_json": "...",
-    "output_spearman_plot": "...",
-    "output_spearman_plot_zoom": "..."
+    "signature_path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/signatures/LUNG001_IMR90_24H_BRD_K54330070_10.csv",
+    "output_dir": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10_dir.csv",
+    "output_csv": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10.csv",
+    "output_spearman_json": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10.json",
+    "output_spearman_plot": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10.png",
+    "output_spearman_plot_zoom": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10_zoom.png"
   },
 
   "batch": {
@@ -41,7 +41,7 @@
     "execution": {
       "resume": true,
       "max_signatures": null,
-      "n_workers": 1,
+      "n_workers": 4,
       "chunk_size": 50
     }
   }

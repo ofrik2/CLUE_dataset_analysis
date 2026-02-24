@@ -41,7 +41,7 @@ def run(
     seed: Optional[int] = 0,
     X: int = 1,
     L: int = 100,
-    output_spearman_plot: Optional[str] = None,  # e.g. "out/rank_agreement_{direction}.png"
+    # output_spearman_plot: Optional[str] = None,  # e.g. "out/rank_agreement_{direction}.png"
     output_spearman_plot_zoom: Optional[str] = None,  # e.g. "out/rank_agreement_top10pct_{direction}.png"
     spearman_plot_zoom_top_fraction: float = 0.1,
     show_progress: bool = True,
@@ -118,17 +118,17 @@ def run(
         # If we end up computing zoom rho, we’ll promote the structure to nested dicts.
         zoom_rho: Optional[float] = None
 
-        if output_spearman_plot:
-            plot_path = output_spearman_plot.format(direction=d)
-            save_rank_agreement_plot(
-                sub,
-                direction=d,
-                spearman_rho=full_rho,
-                out_path=plot_path,
-            )
-
-        if output_spearman_plot_zoom:
-            plot_path = output_spearman_plot_zoom.format(direction=d)
+        # if output_spearman_plot:
+        #     plot_path = output_spearman_plot.format(direction=d)
+        #     save_rank_agreement_plot(
+        #         sub,
+        #         direction=d,
+        #         spearman_rho=full_rho,
+        #         out_path=plot_path,
+        #     )
+        #
+        if spearman_plot_zoom_top_fraction:
+            # plot_path = output_spearman_plot_zoom.format(direction=d)
 
             # Recompute Spearman on the same subset that will be shown in the zoom plot:
             zf = float(spearman_plot_zoom_top_fraction)
@@ -149,13 +149,13 @@ def run(
             else:
                 zoom_rho = float("nan")
 
-            save_rank_agreement_plot(
-                sub,
-                direction=d,
-                spearman_rho=zoom_rho,
-                out_path=plot_path,
-                zoom_top_fraction=spearman_plot_zoom_top_fraction,
-            )
+            # save_rank_agreement_plot(
+            #     sub,
+            #     direction=d,
+            #     spearman_rho=zoom_rho,
+            #     out_path=plot_path,
+            #     zoom_top_fraction=spearman_plot_zoom_top_fraction,
+            # )
 
         # Store return values
         if zoom_rho is None:

@@ -7,6 +7,8 @@ from typing import Optional
 
 from clue_pathway_enrichment.pipeline.config import load_pipeline_config, load_single_run_config
 from clue_pathway_enrichment.pipeline.run_pipeline import run
+from clue_pathway_enrichment.analysis.visualization import save_rank_agreement_plot
+
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -96,15 +98,15 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     res_df, spearman_by_dir = run(
         signature_path=single_cfg.signature_path,
-        pathway_csv=single_cfg.pathway_csv,
+        pathway_csv=pipe_cfg.pathway_csv,
         direction=direction,
         alpha=alpha,
         n_perm=n_perm,
         seed=seed,
         X=X,
         L=L,
-        output_spearman_plot=output_spearman_plot,  # <-- wire through
-        output_spearman_plot_zoom=output_spearman_plot_zoom,
+        # output_spearman_plot=output_spearman_plot,  # <-- wire through
+        # output_spearman_plot_zoom=output_spearman_plot_zoom,
         spearman_plot_zoom_top_fraction=spearman_plot_zoom_top_fraction,
         show_progress=show_progress,
     )
@@ -118,44 +120,45 @@ def main(argv: Optional[list[str]] = None) -> int:
         Path(output_spearman).write_text(json.dumps(spearman_by_dir, indent=2, sort_keys=True))
 
     # (Re-)create plots from the final result DF so CLI can suffix per-direction filenames.
+    # (Re-)create plots: create one file per direction suffix (.pos/.neg)
     if output_spearman_plot or output_spearman_plot_zoom:
-        from clue_pathway_enrichment.analysis.visualization import save_rank_agreement_plot
 
-        # Determine which directions are actually present in results to avoid empty plots.
-        if "direction" in res_df.columns:
-            dirs = sorted(set(res_df["direction"].dropna().astype(str)))
-        else:
-            dirs = []
-
-        # If run returned nothing, still create a single empty plot for the requested direction.
-        if not dirs:
-            dirs = [direction] if direction != "both" else ["pos", "neg"]
+        dirs = ["pos", "neg"] if direction == "both" else [direction]
 
         for d in dirs:
-            if output_spearman_plot:
-                if len(dirs) == 1:
-                    out_path = output_spearman_plot
-                else:
-                    out_path = _with_dir_suffix(output_spearman_plot, d)
+            ddf = res_df[res_df["direction"] == d].copy()
 
+            # spearman_by_dir[d] can be either:
+            # - float (only full), or
+            # - {"full": float, "top_k": float} when zoom is enabled
+            val = spearman_by_dir.get(d)
+            if isinstance(val, dict):
+                rho_full = val.get("full")
+                rho_zoom = val.get("top_k")
+            else:
+                rho_full = val
+                rho_zoom = None
+
+            # Full plot
+            if output_spearman_plot:
                 save_rank_agreement_plot(
-                    res_df,
+                    ddf,
                     direction=d,
-                    spearman_rho=spearman_by_dir.get(d),
-                    out_path=out_path,
+                    spearman_rho=rho_full,
+                    out_path=_with_dir_suffix(output_spearman_plot, d),
+                    title=f"Rank agreement ({d})"
+                          + (f" | Spearman ρ={rho_full:.3f}" if isinstance(rho_full, float) else ""),
                 )
 
-            if output_spearman_plot_zoom:
-                if len(dirs) == 1:
-                    out_path = output_spearman_plot_zoom
-                else:
-                    out_path = _with_dir_suffix(output_spearman_plot_zoom, d)
-
+            # Zoom plot
+            if output_spearman_plot_zoom and spearman_plot_zoom_top_fraction:
                 save_rank_agreement_plot(
-                    res_df,
+                    ddf,
                     direction=d,
-                    spearman_rho=spearman_by_dir.get(d),
-                    out_path=out_path,
+                    spearman_rho=rho_zoom,  # this is the zoom rho if you computed it
+                    out_path=_with_dir_suffix(output_spearman_plot_zoom, d),
+                    title=f"Rank agreement ({d}) — top {int(spearman_plot_zoom_top_fraction * 100)}%"
+                          + (f" | Spearman ρ={rho_zoom:.3f}" if isinstance(rho_zoom, float) else ""),
                     zoom_top_fraction=spearman_plot_zoom_top_fraction,
                 )
 

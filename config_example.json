@@ -1,0 +1,51 @@
+{
+  "pipeline": {
+    "pathway_csv": "path/to/pathways.csv",
+    "direction": "both",
+    "alpha": 0.2,
+    "n_perm": 200,
+    "seed": 0,
+    "X": 1,
+    "L": 100,
+
+    "spearman_plot_zoom_top_fraction": 0.1,
+    "show_progress": true
+  },
+
+  "single_run": {
+    "signature_path": "path/to/signature.csv",
+
+    "output_dir": "path/to/output_dir (optional, convenience only)",
+
+    "output_csv": "path/to/results.csv",
+    "output_spearman_json": "path/to/spearman.json",
+    "output_spearman_plot": "path/to/rank_agreement.png",
+    "output_spearman_plot_zoom": "path/to/rank_agreement.zoom.png"
+  },
+
+  "batch": {
+    "signature_store": {
+      "type": "zarr",
+      "path": "path/to/signatures.zarr"
+    },
+    "sig_ids_path": "path/to/sig_ids.txt",
+
+    "threshold": 0.8,
+    "threshold_metric": "min_all",
+    "top_fractions": [0.1],
+
+    "outputs": {
+      "summary_path": "path/to/batch_summary.parquet",
+      "hits_dir": "path/to/batch_hits_dir",
+      "save_artifacts_for_hits": true
+    },
+
+    "execution": {
+      "resume": true,
+      "max_signatures": null,
+      "n_workers": 1,
+      "chunk_size": 50,
+      "show_progress": true
+    }
+  }
+}

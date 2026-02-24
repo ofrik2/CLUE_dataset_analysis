@@ -4,15 +4,176 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import List, Dict, Tuple, Any, Optional, Iterable
 
 import numpy as np
 import pandas as pd
 import zarr
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
+import multiprocessing as mp
+
 
 from clue_pathway_enrichment.pipeline.config import PipelineConfig
 from clue_pathway_enrichment.pipeline.run_pipeline import run
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+
+# -----------------------
+# Multiprocessing helpers
+# -----------------------
+
+
+
+
+
+def _chunks(xs: list[str], chunk_size: int) -> Iterable[list[str]]:
+    for i in range(0, len(xs), chunk_size):
+        yield xs[i:i + chunk_size]
+
+
+def _pipeline_kwargs_from_cfg(pipeline_cfg) -> dict[str, Any]:
+    """
+    Convert PipelineConfig to kwargs for run().
+    Adjust if your PipelineConfig field names differ.
+    """
+    return dict(
+        pathway_csv=pipeline_cfg.pathway_csv,
+        direction=pipeline_cfg.direction,
+        alpha=pipeline_cfg.alpha,
+        n_perm=pipeline_cfg.n_perm,
+        seed=pipeline_cfg.seed,
+        X=pipeline_cfg.X,
+        L=pipeline_cfg.L,
+        output_spearman_plot=None,
+        output_spearman_plot_zoom=None,
+        spearman_plot_zoom_top_fraction=float(getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)),
+        show_progress=False,
+    )
+
+
+def _process_block_worker(
+    *,
+    zarr_path: str,
+    sig_ids_block: list[str],
+    pipeline_kwargs: dict[str, Any],
+    metric: str,
+    threshold: float,
+) -> tuple[list[dict[str, Any]], list[str], int]:
+    """
+    Worker computes summary rows for a block of sig_ids.
+    Returns: (rows, hit_sig_ids, n_errors)
+    """
+    # local import inside worker is ok; avoids some spawn quirks
+    from clue_pathway_enrichment.pipeline.run_pipeline import run
+
+    root = zarr.open_group(zarr_path, mode="r")
+
+    scores = root["scores"]
+    gene_ids = _as_str_list(root["gene_ids"][:])
+    store_sig_ids = _as_str_list(root["sig_ids"][:])
+    sig_to_col = {s: i for i, s in enumerate(store_sig_ids)}
+
+    # Determine the minimal contiguous slice that covers this block.
+    # Even if there are gaps (due to resume), reading a slightly wider slice is OK.
+    cols = []
+    for s in sig_ids_block:
+        c = sig_to_col.get(s)
+        if c is None:
+            cols.append(None)
+        else:
+            cols.append(c)
+
+    valid_cols = [c for c in cols if c is not None]
+    if not valid_cols:
+        # nothing valid in this block
+        rows = []
+        for s in sig_ids_block:
+            rows.append({
+                "sig_id": s,
+                "status": "error",
+                "error_msg": "KeyError: sig_id not found in zarr sig_ids",
+                "runtime_sec": 0.0,
+                "hit": False,
+                "threshold_metric": metric,
+                "threshold": float(threshold),
+                "spearman_pos": None,
+                "spearman_neg": None,
+                "threshold_score": None,
+            })
+        return rows, [], len(sig_ids_block)
+
+    j0, j1 = min(valid_cols), max(valid_cols) + 1
+    mat = np.asarray(scores[:, j0:j1], dtype=np.float32)  # (genes, width)
+
+    # Reuse one DF to avoid rebuilding index every signature (big speed win)
+    sig_df = pd.DataFrame({"gene": gene_ids, "score": np.zeros(len(gene_ids), dtype=np.float32)})
+
+    rows: list[dict[str, Any]] = []
+    hit_ids: list[str] = []
+    n_errors = 0
+
+    for s, c in zip(sig_ids_block, cols):
+        t0 = time.time()
+        row: dict[str, Any] = {
+            "sig_id": s,
+            "status": "ok",
+            "error_msg": None,
+            "runtime_sec": None,
+            "hit": False,
+            "threshold_metric": metric,
+            "threshold": float(threshold),
+        }
+
+        try:
+            if c is None:
+                raise KeyError(f"sig_id not found in zarr sig_ids: {s}")
+
+            vec = mat[:, c - j0]
+            sig_df["score"].values[:] = vec
+
+            res_df, spearman_by_dir = run(signature_path=sig_df, **pipeline_kwargs)
+
+            sp_pos = _safe_float(spearman_by_dir.get("pos"))
+            sp_neg = _safe_float(spearman_by_dir.get("neg"))
+            row["spearman_pos"] = sp_pos
+            row["spearman_neg"] = sp_neg
+
+            # counts (optional)
+            if isinstance(res_df, pd.DataFrame) and "direction" in res_df.columns:
+                row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
+                row["n_pathways_neg"] = int((res_df["direction"] == "neg").sum())
+            else:
+                row["n_pathways_pos"] = None
+                row["n_pathways_neg"] = None
+
+            score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg)
+            row["threshold_score"] = score_for_threshold
+            row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
+
+            if row["hit"]:
+                hit_ids.append(s)
+
+        except Exception as e:
+            n_errors += 1
+            row["status"] = "error"
+            row["error_msg"] = f"{type(e).__name__}: {e}"
+            row["spearman_pos"] = None
+            row["spearman_neg"] = None
+            row["threshold_score"] = None
+            row["hit"] = False
+
+        row["runtime_sec"] = round(time.time() - t0, 4)
+        rows.append(row)
+
+    return rows, hit_ids, n_errors
+
+
+
+# -----------------------
+# Progress bars helpers
+# -----------------------
 
 def _iter_with_progress(it, *, total: int, desc: str, enabled: bool):
     """Yield from an iterable, optionally wrapped in a tqdm progress bar (with ETA)."""
@@ -94,12 +255,9 @@ def scan_signatures(
 
     Zarr format assumptions:
       root["scores"] : 2D array shape (n_genes, n_sigs)
-      root["gene_ids"]: 1D array len n_genes (strings)
-      root["sig_ids"] : 1D array len n_sigs (strings)
+      root["gene_ids"]: 1D array len n_genes (strings/bytes)
+      root["sig_ids"] : 1D array len n_sigs (strings/bytes)
     """
-    if n_workers != 1:
-        raise NotImplementedError("Parallel batch scan is not implemented yet. Set batch.execution.n_workers=1.")
-
     if chunk_size < 1:
         raise ValueError(f"chunk_size must be >= 1. Got: {chunk_size}")
 
@@ -108,8 +266,7 @@ def scan_signatures(
     if metric not in supported_metrics:
         raise ValueError(
             f"Unsupported threshold_metric={threshold_metric!r}. "
-            f"Supported: {sorted(supported_metrics)}. "
-            f"(Zoom/top-fraction metrics can be added next.)"
+            f"Supported: {sorted(supported_metrics)}."
         )
 
     # Prepare summary writing strategy
@@ -123,9 +280,12 @@ def scan_signatures(
     # Resume: determine processed sig_ids
     processed = set()
     if resume:
-        processed = _load_processed_sig_ids(summary_csv_path, summary_path_p if summary_is_parquet else None)
+        processed = _load_processed_sig_ids(
+            summary_csv_path,
+            summary_path_p if summary_is_parquet else None,
+        )
 
-    # Open Zarr store + read metadata (this can take time on large stores)
+    # Open Zarr store + read metadata
     zbar = _zarr_init_progress(enabled=show_progress)
     if zbar is not None:
         zbar.set_postfix_str("open_group")
@@ -133,18 +293,11 @@ def scan_signatures(
     if zbar is not None:
         zbar.update(1)
 
-    if "scores" not in root:
-        if zbar is not None:
-            zbar.close()
-        raise KeyError(f"Zarr store missing dataset 'scores': {zarr_path}")
-    if "gene_ids" not in root:
-        if zbar is not None:
-            zbar.close()
-        raise KeyError(f"Zarr store missing dataset 'gene_ids': {zarr_path}")
-    if "sig_ids" not in root:
-        if zbar is not None:
-            zbar.close()
-        raise KeyError(f"Zarr store missing dataset 'sig_ids': {zarr_path}")
+    for key in ("scores", "gene_ids", "sig_ids"):
+        if key not in root:
+            if zbar is not None:
+                zbar.close()
+            raise KeyError(f"Zarr store missing dataset {key!r}: {zarr_path}")
 
     scores = root["scores"]
 
@@ -162,7 +315,6 @@ def scan_signatures(
 
     if zbar is not None:
         zbar.set_postfix_str("index sig_ids")
-    # Map signature id -> column index
     sig_to_col = {s: i for i, s in enumerate(store_sig_ids)}
     if zbar is not None:
         zbar.update(1)
@@ -177,135 +329,177 @@ def scan_signatures(
     # Summary CSV header management
     write_header = not summary_csv_path.exists()
 
-    # Main loop
+    # Filter to do list (resume)
+    todo_sig_ids = [s for s in sig_ids if s not in processed]
     n_total = len(sig_ids)
+    n_todo = len(todo_sig_ids)
+
     n_done = 0
-    n_skipped = 0
+    n_skipped = n_total - n_todo
     n_errors = 0
     n_hits = 0
 
-    buffer_rows: list[dict[str, Any]] = []
+    # ---------- SINGLE PROCESS PATH ----------
+    if n_workers <= 1:
+        buffer_rows: list[dict[str, Any]] = []
 
-    iter_ids = _iter_with_progress(
-        enumerate(sig_ids),
-        total=n_total,
-        desc="batch scan",
+        iter_ids = _iter_with_progress(
+            enumerate(sig_ids),
+            total=n_total,
+            desc="batch scan",
+            enabled=show_progress,
+        )
+
+        for idx, sig_id in iter_ids:
+            if sig_id in processed:
+                continue
+
+            t0 = time.time()
+            row: dict[str, Any] = {
+                "sig_id": sig_id,
+                "status": "ok",
+                "error_msg": None,
+                "runtime_sec": None,
+                "hit": False,
+                "threshold_metric": metric,
+                "threshold": float(threshold),
+            }
+
+            try:
+                col = sig_to_col.get(sig_id)
+                if col is None:
+                    raise KeyError(f"sig_id not found in zarr sig_ids: {sig_id}")
+
+                vec_np = np.asarray(scores[:, col], dtype=np.float32)
+
+                sig_df = pd.DataFrame({"gene": gene_ids, "score": vec_np})
+
+                res_df, spearman_by_dir = run(
+                    signature_path=sig_df,
+                    pathway_csv=pipeline_cfg.pathway_csv,
+                    direction=pipeline_cfg.direction,
+                    alpha=pipeline_cfg.alpha,
+                    n_perm=pipeline_cfg.n_perm,
+                    seed=pipeline_cfg.seed,
+                    X=pipeline_cfg.X,
+                    L=pipeline_cfg.L,
+                    output_spearman_plot=None,
+                    output_spearman_plot_zoom=None,
+                    spearman_plot_zoom_top_fraction=float(getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)),
+                    show_progress=False,
+                )
+
+                sp_pos = _safe_float(spearman_by_dir.get("pos"))
+                sp_neg = _safe_float(spearman_by_dir.get("neg"))
+                row["spearman_pos"] = sp_pos
+                row["spearman_neg"] = sp_neg
+
+                if "direction" in res_df.columns:
+                    row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
+                    row["n_pathways_neg"] = int((res_df["direction"] == "neg").sum())
+                else:
+                    row["n_pathways_pos"] = int(len(res_df)) if pipeline_cfg.direction == "pos" else 0
+                    row["n_pathways_neg"] = int(len(res_df)) if pipeline_cfg.direction == "neg" else 0
+
+                score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg)
+                row["threshold_score"] = score_for_threshold
+                row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
+
+                if row["hit"]:
+                    n_hits += 1
+                    if save_artifacts_for_hits and hits_dir_p is not None:
+                        _save_hit_artifacts(
+                            hits_dir=hits_dir_p,
+                            sig_id=sig_id,
+                            res_df=res_df,
+                            spearman_by_dir=spearman_by_dir,
+                            pipeline_cfg=pipeline_cfg,
+                            top_fractions=top_fractions,
+                        )
+
+            except Exception as e:
+                n_errors += 1
+                row["status"] = "error"
+                row["error_msg"] = f"{type(e).__name__}: {e}"
+
+            row["runtime_sec"] = round(time.time() - t0, 4)
+            buffer_rows.append(row)
+            n_done += 1
+
+            if len(buffer_rows) >= chunk_size:
+                _append_summary_rows_csv(summary_csv_path, buffer_rows, write_header=write_header)
+                write_header = False
+                buffer_rows.clear()
+
+                done_plus_skipped = n_done + n_skipped
+                print(
+                    f"[batch] processed={done_plus_skipped}/{n_total} "
+                    f"(done={n_done}, skipped={n_skipped}, errors={n_errors}, hits={n_hits})"
+                )
+
+        if buffer_rows:
+            _append_summary_rows_csv(summary_csv_path, buffer_rows, write_header=write_header)
+
+        if summary_is_parquet:
+            _convert_csv_to_parquet(summary_csv_path, summary_path_p)
+
+        print(
+            f"[batch] finished. total={n_total} done={n_done} skipped={n_skipped} "
+            f"errors={n_errors} hits={n_hits} summary={summary_path}"
+        )
+        return
+
+    # ---------- MULTIPROCESS PATH ----------
+    pipeline_kwargs = _pipeline_kwargs_from_cfg(pipeline_cfg)
+
+    # Progress over blocks (not per sig) to avoid interleaved stdout from workers
+    blocks = list(_chunks(todo_sig_ids, chunk_size))
+    block_iter = _iter_with_progress(
+        enumerate(blocks),
+        total=len(blocks),
+        desc="batch scan (blocks)",
         enabled=show_progress,
     )
 
-    for idx, sig_id in iter_ids:
-        if sig_id in processed:
-            n_skipped += 1
-            continue
+    # Parent will buffer rows and flush periodically
+    buffer_rows: list[dict[str, Any]] = []
+    flush_every_blocks = 1  # flush after each completed block; safe for long runs
 
-        t0 = time.time()
-        row: dict[str, Any] = {
-            "sig_id": sig_id,
-            "status": "ok",
-            "error_msg": None,
-            "runtime_sec": None,
-            "hit": False,
-            "threshold_metric": metric,
-            "threshold": float(threshold),
-        }
-
-        try:
-            col = sig_to_col.get(sig_id)
-            if col is None:
-                raise KeyError(f"sig_id not found in zarr sig_ids: {sig_id}")
-
-            # Load vector (one column)
-            vec = scores[:, col]
-            # Ensure we have a real numpy array
-            vec_np = np.asarray(vec, dtype=np.float32)
-
-            # Build signature DF expected by pipeline
-            sig_df = pd.DataFrame({"gene": gene_ids, "score": vec_np})
-
-            # Run pipeline
-            res_df, spearman_by_dir = run(
-                signature_path=sig_df,  # your run() now supports DF
-                pathway_csv=pipeline_cfg.pathway_csv,
-                direction=pipeline_cfg.direction,
-                alpha=pipeline_cfg.alpha,
-                n_perm=pipeline_cfg.n_perm,
-                seed=pipeline_cfg.seed,
-                X=pipeline_cfg.X,
-                L=pipeline_cfg.L,
-                output_spearman_plot=None,
-                output_spearman_plot_zoom=None,
-                spearman_plot_zoom_top_fraction=float(getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)),
-                show_progress=False,  # don't nest progress bars (batch controls the outer loop)
+    # submit all jobs first (fast)
+    ctx = mp.get_context("spawn")  # safest on macOS
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
+        futures = [
+            ex.submit(
+                _process_block_worker,
+                zarr_path=zarr_path,
+                sig_ids_block=block,
+                pipeline_kwargs=pipeline_kwargs,
+                metric=metric,
+                threshold=float(threshold),
             )
+            for block in blocks
+        ]
 
-            # Flatten spearman metrics
-            sp_pos = _safe_float(spearman_by_dir.get("pos"))
-            sp_neg = _safe_float(spearman_by_dir.get("neg"))
-            row["spearman_pos"] = sp_pos
-            row["spearman_neg"] = sp_neg
+        # NOW show progress as blocks complete (this reflects real work)
+        for fut in tqdm(as_completed(futures), total=len(futures), desc="batch scan (done blocks)"):
+            rows, hit_ids, block_errors = fut.result()
 
-            # pathway counts (if direction column exists)
-            if "direction" in res_df.columns:
-                row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
-                row["n_pathways_neg"] = int((res_df["direction"] == "neg").sum())
-            else:
-                # single direction run
-                row["n_pathways_pos"] = int(len(res_df)) if pipeline_cfg.direction == "pos" else 0
-                row["n_pathways_neg"] = int(len(res_df)) if pipeline_cfg.direction == "neg" else 0
+            n_done += len(rows)
+            n_errors += int(block_errors)
+            n_hits += len(hit_ids)
 
-            # Hit decision
-            score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg)
-            row["threshold_score"] = score_for_threshold
-            row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
+            buffer_rows.extend(rows)
 
-            # Save artifacts if hit
-            if row["hit"]:
-                n_hits += 1
-                if save_artifacts_for_hits and hits_dir_p is not None:
-                    _save_hit_artifacts(
-                        hits_dir=hits_dir_p,
-                        sig_id=sig_id,
-                        res_df=res_df,
-                        spearman_by_dir=spearman_by_dir,
-                        pipeline_cfg=pipeline_cfg,
-                        top_fractions=top_fractions,
-                    )
+            # flush each completed block (safe for long runs)
+            if buffer_rows:
+                _append_summary_rows_csv(summary_csv_path, buffer_rows, write_header=write_header)
+                write_header = False
+                buffer_rows.clear()
 
-        except Exception as e:
-            n_errors += 1
-            row["status"] = "error"
-            row["error_msg"] = f"{type(e).__name__}: {e}"
-
-        row["runtime_sec"] = round(time.time() - t0, 4)
-        buffer_rows.append(row)
-        n_done += 1
-
-        # Flush periodically
-        if len(buffer_rows) >= chunk_size:
-            _append_summary_rows_csv(summary_csv_path, buffer_rows, write_header=write_header)
-            write_header = False
-            buffer_rows.clear()
-
-            # lightweight progress print (helpful when stderr isn't interactive)
-            done_plus_skipped = n_done + n_skipped
             print(
-                f"[batch] processed={done_plus_skipped}/{n_total} "
+                f"[batch] processed={n_done + n_skipped}/{n_total} "
                 f"(done={n_done}, skipped={n_skipped}, errors={n_errors}, hits={n_hits})"
             )
-
-    # Flush remainder
-    if buffer_rows:
-        _append_summary_rows_csv(summary_csv_path, buffer_rows, write_header=write_header)
-        buffer_rows.clear()
-
-    # Convert to parquet if requested
-    if summary_is_parquet:
-        _convert_csv_to_parquet(summary_csv_path, summary_path_p)
-
-    print(
-        f"[batch] finished. total={n_total} done={n_done} skipped={n_skipped} "
-        f"errors={n_errors} hits={n_hits} summary={summary_path}"
-    )
 
 
 # -------------------------
