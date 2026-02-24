@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 _ALLOWED_DIRECTIONS = {"pos", "neg", "both"}
+_ALLOWED_SIGNATURE_RANKING = {"signed_split", "abs"}
 
 '''
 NOTE: this config loader still handles a single signature run. 
@@ -61,6 +62,9 @@ class PipelineConfig:
     X: int = 1
     L: int = 100
 
+    signature_ranking: str = "signed_split"
+
+
     # zoomed rank agreement plot
     spearman_plot_zoom_top_fraction: float = 0.1
 
@@ -70,6 +74,12 @@ class PipelineConfig:
     def validate(self) -> None:
         if self.direction not in _ALLOWED_DIRECTIONS:
             raise ValueError(f"direction must be one of {_ALLOWED_DIRECTIONS}, got: {self.direction}")
+        sr = str(self.signature_ranking).strip().lower()
+        if sr not in _ALLOWED_SIGNATURE_RANKING:
+            raise ValueError(
+                f"signature_ranking must be one of {_ALLOWED_SIGNATURE_RANKING}, got: {self.signature_ranking}")
+        if sr == "abs" and self.direction != "both":
+            raise ValueError("When signature_ranking='abs', direction must be 'both' (single list mode).")
         if self.alpha <= 0 or self.alpha >= 1:
             raise ValueError(f"alpha must be in (0, 1), got: {self.alpha}")
         if self.n_perm < 0:
@@ -203,6 +213,7 @@ def load_pipeline_config(path: Union[str, Path]) -> PipelineConfig:
     cfg = PipelineConfig(
         pathway_csv=str(table["pathway_csv"]),
         direction=str(table.get("direction", "both")),
+        signature_ranking=str(table.get("signature_ranking", "signed_split")),
         alpha=float(table.get("alpha", 0.2)),
         n_perm=int(table.get("n_perm", 200)),
         seed=_coerce_int_or_none(table.get("seed", 0)),

@@ -2,6 +2,7 @@
   "pipeline": {
     "pathway_csv": "path/to/pathways.csv",
     "direction": "both",
+    "signature_ranking": "abs",
     "alpha": 0.2,
     "n_perm": 200,
     "seed": 0,

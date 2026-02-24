@@ -6,7 +6,7 @@ from clue_pathway_enrichment.io.load_signature import load_signature_table
 from clue_pathway_enrichment.io.load_signature import standardize_signature_df
 from clue_pathway_enrichment.io.load_pathways import load_pathway_mapping_csv
 from clue_pathway_enrichment.preprocessing.create_ranked_list import pathway_to_binary_vector
-from clue_pathway_enrichment.preprocessing.split_rank_signature import split_and_rank_signature
+from clue_pathway_enrichment.preprocessing.split_rank_signature import rank_signature
 from clue_pathway_enrichment.methods.alpha_rra_wrapper import run_alpha_rra
 from clue_pathway_enrichment.methods.xlmhg_wrapper import run_xlmhg
 from clue_pathway_enrichment.analysis.ranking import add_ranks
@@ -35,7 +35,8 @@ def _iter_with_progress(it, *, total: int, desc: str, enabled: bool):
 def run(
     signature_path: str | pd.DataFrame,
     pathway_csv: str,
-    direction: str = "both",   # "pos" | "neg" | "both"
+    direction: str = "both", # "pos" | "neg" | "both". if "abs" is used, a direction is both but has no meaning
+    signature_ranking: str = "signed_split",
     alpha: float = 0.2,
     n_perm: int = 200,
     seed: Optional[int] = 0,
@@ -55,10 +56,13 @@ def run(
 
     pathways = load_pathway_mapping_csv(pathway_csv)
 
-    pos_ranked, neg_ranked = split_and_rank_signature(sig)
-    ranked_by_dir = {"pos": pos_ranked, "neg": neg_ranked}
+    ranked_by_dir = rank_signature(sig, mode=signature_ranking) #dicionary
 
-    enabled = ["pos", "neg"] if direction == "both" else [direction]
+    if signature_ranking.strip().lower() == "abs" and direction != "both":
+        raise ValueError("When signature_ranking='abs', set direction='both' (single list mode).")
+
+    enabled = list(ranked_by_dir.keys()) if direction == "both" else [direction]
+
     for d in enabled:
         if d not in ranked_by_dir:
             raise ValueError(f"direction must be pos|neg|both, got: {direction}")
@@ -177,40 +181,3 @@ def run(
     return res2, spearman_by_dir
 
 
-
-def run_from_config(
-    config_path: str,
-    *,
-    direction: Optional[str] = None,
-    alpha: Optional[float] = None,
-    n_perm: Optional[int] = None,
-    seed: Optional[int] = None,
-    X: Optional[int] = None,
-    L: Optional[int] = None,
-    output_spearman_plot: Optional[str] = None,
-    output_spearman_plot_zoom: Optional[str] = None,
-    show_progress: Optional[bool] = None,
-) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Load a config (JSON preferred; TOML supported) and run the pipeline.
-
-    This is a thin helper around :func:`run`.
-    """
-
-    from clue_pathway_enrichment.pipeline.config import load_pipeline_config
-
-    cfg = load_pipeline_config(config_path)
-
-    return run(
-        signature_path=cfg.signature_path,
-        pathway_csv=cfg.pathway_csv,
-        direction=direction if direction is not None else cfg.direction,
-        alpha=alpha if alpha is not None else cfg.alpha,
-        n_perm=n_perm if n_perm is not None else cfg.n_perm,
-        seed=seed if seed is not None else cfg.seed,
-        X=X if X is not None else cfg.X,
-        L=L if L is not None else cfg.L,
-        output_spearman_plot=output_spearman_plot if output_spearman_plot is not None else getattr(cfg, "output_spearman_plot", None),
-        output_spearman_plot_zoom=output_spearman_plot_zoom if output_spearman_plot_zoom is not None else getattr(cfg, "output_spearman_plot_zoom", None),
-        spearman_plot_zoom_top_fraction=float(getattr(cfg, "spearman_plot_zoom_top_fraction", 0.1)),
-        show_progress=(show_progress if show_progress is not None else bool(getattr(cfg, "show_progress", True))),
-    )

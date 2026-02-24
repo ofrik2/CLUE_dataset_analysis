@@ -94,12 +94,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         else float(getattr(single_cfg, "spearman_plot_zoom_top_fraction", 0.1))
     )
 
+    signature_ranking = pipe_cfg.signature_ranking
+
     show_progress = (not args.no_progress) and bool(getattr(pipe_cfg, "show_progress", True))
 
     res_df, spearman_by_dir = run(
         signature_path=single_cfg.signature_path,
         pathway_csv=pipe_cfg.pathway_csv,
         direction=direction,
+        signature_ranking=signature_ranking,
         alpha=alpha,
         n_perm=n_perm,
         seed=seed,
