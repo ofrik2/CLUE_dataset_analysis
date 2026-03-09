@@ -65,7 +65,7 @@ def _with_dir_suffix(path: str, direction: str) -> str:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv) #parses config
 
     pipe_cfg = load_pipeline_config(args.config)
     single_cfg = load_single_run_config(args.config)
@@ -125,11 +125,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     # (Re-)create plots from the final result DF so CLI can suffix per-direction filenames.
     # (Re-)create plots: create one file per direction suffix (.pos/.neg)
     if output_spearman_plot or output_spearman_plot_zoom:
-
-        dirs = ["pos", "neg"] if direction == "both" else [direction]
+        # Use the actual directions present in the result dataframe.
+        # This supports both:
+        # - signed_split mode: ["pos", "neg"]
+        # - abs mode: ["abs"]
+        dirs = sorted(res_df["direction"].dropna().unique().tolist())
 
         for d in dirs:
             ddf = res_df[res_df["direction"] == d].copy()
+
+            # Skip completely empty subsets just in case
+            if ddf.empty:
+                continue
 
             # spearman_by_dir[d] can be either:
             # - float (only full), or
@@ -158,7 +165,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 save_rank_agreement_plot(
                     ddf,
                     direction=d,
-                    spearman_rho=rho_zoom,  # this is the zoom rho if you computed it
+                    spearman_rho=rho_zoom,
                     out_path=_with_dir_suffix(output_spearman_plot_zoom, d),
                     title=f"Rank agreement ({d}) — top {int(spearman_plot_zoom_top_fraction * 100)}%"
                           + (f" | Spearman ρ={rho_zoom:.3f}" if isinstance(rho_zoom, float) else ""),
