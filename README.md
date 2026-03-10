@@ -38,44 +38,44 @@ PYTHONPATH=$PWD/src python -m clue_pathway_enrichment.pipeline.cli --config conf
 
 ---
 
-## How it works (flowchart)
+## How it works flowchart
 
 ```mermaid
 flowchart TD
-  A[Load config.json] --> B{Mode}
+  A["Load config.json"] --> B{"Mode"}
 
-  B -->|single_run| C[Load pathway mapping CSV]
-  C --> D[Load signature table\nCSV/TSV -> DataFrame\n(or in-memory DataFrame)]
-  D --> E{signature_ranking}
+  B -->|single_run| C["Load pathway mapping CSV"]
+  C --> D["Load signature table<br/>CSV/TSV to DataFrame<br/>or in-memory DataFrame"]
+  D --> E{"signature_ranking"}
 
-  E -->|signed_split| F[Split into pos + neg\nRank within each]
-  E -->|abs| G[Rank by |score|\nSingle list "abs"]
+  E -->|signed_split| F["Split into pos + neg<br/>Rank within each"]
+  E -->|abs| G["Rank by absolute score<br/>Single list: abs"]
 
-  F --> H[For each direction: pos/neg]
-  G --> I[Single direction: abs]
+  F --> H["For each direction: pos/neg"]
+  G --> I["Single direction: abs"]
 
-  H --> J[For each pathway]
+  H --> J["For each pathway"]
   I --> J
 
-  J --> K[Convert pathway gene set to binary hit vector\n(ordered by ranked genes)]
-  K --> L[Run alpha-RRA -> p-value]
-  K --> M[Run XL-mHG -> p-value]
+  J --> K["Convert pathway gene set to binary hit vector<br/>ordered by ranked genes"]
+  K --> L["Run alpha-RRA to get p-value"]
+  K --> M["Run XL-mHG to get p-value"]
 
-  L --> N[Rank pathways by alpha-RRA p]
-  M --> O[Rank pathways by XL-mHG p]
+  L --> N["Rank pathways by alpha-RRA p"]
+  M --> O["Rank pathways by XL-mHG p"]
 
-  N --> P[Compute Spearman ρ\n(rank_alpha_rra vs rank_xlmhg)]
+  N --> P["Compute Spearman rho<br/>rank_alpha_rra vs rank_xlmhg"]
   O --> P
 
-  P --> Q[Write outputs\nCSV / JSON / plots]
+  P --> Q["Write outputs<br/>CSV / JSON / plots"]
 
-  B -->|batch| R[Read sig_ids list]
-  R --> S[Open Zarr store\n(scores, gene_ids, sig_ids)]
-  S --> T[For each signature (parallel optional)]
-  T --> U[Build signature DataFrame\n(gene, score)]
-  U --> V[Run single-run pipeline (no plots)]
-  V --> W[Compute threshold metric\n(pos/neg/min)]
-  W --> X[Append to summary + save hit artifacts]
+  B -->|batch| R["Read sig_ids list"]
+  R --> S["Open Zarr store<br/>scores, gene_ids, sig_ids"]
+  S --> T["For each signature<br/>parallel optional"]
+  T --> U["Build signature DataFrame<br/>gene, score"]
+  U --> V["Run single-run pipeline<br/>no plots"]
+  V --> W["Compute threshold metric<br/>pos/neg/min"]
+  W --> X["Append to summary and save hit artifacts"]
 ```
 
 ---
