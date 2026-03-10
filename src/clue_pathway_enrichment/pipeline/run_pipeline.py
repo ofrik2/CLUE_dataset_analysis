@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 import pandas as pd
+import math
 
 from clue_pathway_enrichment.io.load_signature import load_signature_table
 from clue_pathway_enrichment.io.load_signature import standardize_signature_df
@@ -41,7 +42,7 @@ def run(
     n_perm: int = 200,
     seed: Optional[int] = 0,
     X: int = 1,
-    L: int = 100,
+    L: Optional[int] = None,
     # output_spearman_plot: Optional[str] = None,  # e.g. "out/rank_agreement_{direction}.png"
     output_spearman_plot_zoom: Optional[str] = None,  # e.g. "out/rank_agreement_top10pct_{direction}.png"
     spearman_plot_zoom_top_fraction: float = 0.1,
@@ -76,6 +77,10 @@ def run(
         if ranked.empty:
             continue
 
+        N_list = len(ranked)
+        L_current = L if L is not None else max(1, math.ceil(alpha * N_list))
+        print(f"direction={d}, N_list={N_list}, L_input={L}, L_current={L_current}")
+
         desc = f"scoring pathways ({d})"
         # iterating pathways
         for pname, geneset in _iter_with_progress(
@@ -90,7 +95,7 @@ def run(
                 continue
 
             rra_stat, rra_p = run_alpha_rra(v, alpha=alpha, n_perm=n_perm, seed=seed)
-            xlmhg_stat, xlmhg_p = run_xlmhg(v, X=X, L=L)
+            xlmhg_stat, xlmhg_p = run_xlmhg(v, X=X, L=L_current)
 
             rows.append({
                 "direction": d,

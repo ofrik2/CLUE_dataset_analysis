@@ -2,12 +2,11 @@
   "pipeline": {
     "pathway_csv": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/metadata/pathway_summary_msigdb_reactome.csv",
     "direction": "both",
-    "signature_ranking": "abs",
-    "alpha": 0.2,
+    "signature_ranking": "signed_split",
+    "alpha": 0.1,
     "n_perm": 2000,
     "seed": 0,
     "X": 1,
-    "L": 2466,
 
     "spearman_plot_zoom_top_fraction": 0.1,
     "show_progress": true

@@ -60,7 +60,7 @@ class PipelineConfig:
     n_perm: int = 200
     seed: Optional[int] = 0
     X: int = 1
-    L: int = 100
+    L: Optional[int] = None
 
     signature_ranking: str = "signed_split"
 
@@ -86,8 +86,8 @@ class PipelineConfig:
             raise ValueError(f"n_perm must be >= 0, got: {self.n_perm}")
         if self.X < 1:
             raise ValueError(f"X must be >= 1, got: {self.X}")
-        if self.L < 1:
-            raise ValueError(f"L must be >= 1, got: {self.L}")
+        if self.L is not None and self.L < 1:
+            raise ValueError(f"L must be >= 1 when provided, got: {self.L}")
         if not (0 < float(self.spearman_plot_zoom_top_fraction) <= 1):
             raise ValueError(
                 f"spearman_plot_zoom_top_fraction must be in (0, 1], got: {self.spearman_plot_zoom_top_fraction}"
@@ -218,7 +218,7 @@ def load_pipeline_config(path: Union[str, Path]) -> PipelineConfig:
         n_perm=int(table.get("n_perm", 200)),
         seed=_coerce_int_or_none(table.get("seed", 0)),
         X=int(table.get("X", 1)),
-        L=int(table.get("L", 100)),
+        L=_coerce_int_or_none(table.get("L", None)),
         spearman_plot_zoom_top_fraction=float(table.get("spearman_plot_zoom_top_fraction", 0.1)),
         show_progress=bool(table.get("show_progress", True)),
     )
