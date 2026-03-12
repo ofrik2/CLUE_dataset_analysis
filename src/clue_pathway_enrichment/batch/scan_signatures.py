@@ -36,19 +36,19 @@ def _chunks(xs: list[str], chunk_size: int) -> Iterable[list[str]]:
 def _pipeline_kwargs_from_cfg(pipeline_cfg) -> dict[str, Any]:
     """
     Convert PipelineConfig to kwargs for run().
-    Adjust if your PipelineConfig field names differ.
     """
     return dict(
         pathway_csv=pipeline_cfg.pathway_csv,
         direction=pipeline_cfg.direction,
+        signature_ranking=pipeline_cfg.signature_ranking,
         alpha=pipeline_cfg.alpha,
         n_perm=pipeline_cfg.n_perm,
         seed=pipeline_cfg.seed,
         X=pipeline_cfg.X,
         L=pipeline_cfg.L,
-        output_spearman_plot=None,
-        output_spearman_plot_zoom=None,
-        spearman_plot_zoom_top_fraction=float(getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)),
+        spearman_plot_zoom_top_fraction=float(
+            getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)
+        ),
         show_progress=False,
     )
 
@@ -137,18 +137,23 @@ def _process_block_worker(
 
             sp_pos = _safe_float(spearman_by_dir.get("pos"))
             sp_neg = _safe_float(spearman_by_dir.get("neg"))
+            sp_abs = _safe_float(spearman_by_dir.get("abs"))
+
             row["spearman_pos"] = sp_pos
             row["spearman_neg"] = sp_neg
+            row["spearman_abs"] = sp_abs
 
-            # counts (optional)
             if isinstance(res_df, pd.DataFrame) and "direction" in res_df.columns:
                 row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
                 row["n_pathways_neg"] = int((res_df["direction"] == "neg").sum())
+                row["n_pathways_abs"] = int((res_df["direction"] == "abs").sum())
             else:
                 row["n_pathways_pos"] = None
                 row["n_pathways_neg"] = None
+                row["n_pathways_abs"] = None
 
-            score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg)
+            score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg, sp_abs)
+
             row["threshold_score"] = score_for_threshold
             row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
 
@@ -161,6 +166,7 @@ def _process_block_worker(
             row["error_msg"] = f"{type(e).__name__}: {e}"
             row["spearman_pos"] = None
             row["spearman_neg"] = None
+            row["spearman_abs"] = None
             row["threshold_score"] = None
             row["hit"] = False
 
@@ -262,7 +268,8 @@ def scan_signatures(
         raise ValueError(f"chunk_size must be >= 1. Got: {chunk_size}")
 
     metric = str(threshold_metric).strip().lower()
-    supported_metrics = {"pos_all", "neg_all", "min_all"}
+    supported_metrics = {"pos_all", "neg_all", "min_all", "abs_all"}
+
     if metric not in supported_metrics:
         raise ValueError(
             f"Unsupported threshold_metric={threshold_metric!r}. "
@@ -378,30 +385,36 @@ def scan_signatures(
                     signature_path=sig_df,
                     pathway_csv=pipeline_cfg.pathway_csv,
                     direction=pipeline_cfg.direction,
+                    signature_ranking=pipeline_cfg.signature_ranking,
                     alpha=pipeline_cfg.alpha,
                     n_perm=pipeline_cfg.n_perm,
                     seed=pipeline_cfg.seed,
                     X=pipeline_cfg.X,
                     L=pipeline_cfg.L,
-                    output_spearman_plot=None,
-                    output_spearman_plot_zoom=None,
-                    spearman_plot_zoom_top_fraction=float(getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)),
+                    spearman_plot_zoom_top_fraction=float(
+                        getattr(pipeline_cfg, "spearman_plot_zoom_top_fraction", 0.1)),
                     show_progress=False,
                 )
 
                 sp_pos = _safe_float(spearman_by_dir.get("pos"))
                 sp_neg = _safe_float(spearman_by_dir.get("neg"))
+                sp_abs = _safe_float(spearman_by_dir.get("abs"))
+
                 row["spearman_pos"] = sp_pos
                 row["spearman_neg"] = sp_neg
+                row["spearman_abs"] = sp_abs
 
                 if "direction" in res_df.columns:
                     row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
                     row["n_pathways_neg"] = int((res_df["direction"] == "neg").sum())
+                    row["n_pathways_abs"] = int((res_df["direction"] == "abs").sum())
                 else:
-                    row["n_pathways_pos"] = int(len(res_df)) if pipeline_cfg.direction == "pos" else 0
-                    row["n_pathways_neg"] = int(len(res_df)) if pipeline_cfg.direction == "neg" else 0
+                    row["n_pathways_pos"] = 0
+                    row["n_pathways_neg"] = 0
+                    row["n_pathways_abs"] = int(len(res_df)) if pipeline_cfg.signature_ranking == "abs" else 0
 
-                score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg)
+                score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg, sp_abs)
+
                 row["threshold_score"] = score_for_threshold
                 row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
 
@@ -454,12 +467,7 @@ def scan_signatures(
 
     # Progress over blocks (not per sig) to avoid interleaved stdout from workers
     blocks = list(_chunks(todo_sig_ids, chunk_size))
-    block_iter = _iter_with_progress(
-        enumerate(blocks),
-        total=len(blocks),
-        desc="batch scan (blocks)",
-        enabled=show_progress,
-    )
+
 
     # Parent will buffer rows and flush periodically
     buffer_rows: list[dict[str, Any]] = []
@@ -481,7 +489,8 @@ def scan_signatures(
         ]
 
         # NOW show progress as blocks complete (this reflects real work)
-        for fut in tqdm(as_completed(futures), total=len(futures), desc="batch scan (done blocks)"):
+        # for fut in tqdm(as_completed(futures), total=len(futures), desc="batch scan (done blocks)")
+        for fut in as_completed(futures):
             rows, hit_ids, block_errors = fut.result()
 
             n_done += len(rows)
@@ -530,15 +539,28 @@ def _safe_float(x: Any) -> Optional[float]:
     return v
 
 
-def _compute_threshold_score(metric: str, sp_pos: Optional[float], sp_neg: Optional[float]) -> Optional[float]:
+def _compute_threshold_score(
+    metric: str,
+    sp_pos: Optional[float],
+    sp_neg: Optional[float],
+    sp_abs: Optional[float],
+) -> Optional[float]:
+    metric = str(metric).strip().lower()
+
     if metric == "pos_all":
         return sp_pos
+
     if metric == "neg_all":
         return sp_neg
+
+    if metric == "abs_all":
+        return sp_abs
+
     if metric == "min_all":
-        vals = [v for v in (sp_pos, sp_neg) if v is not None]
+        vals = [x for x in (sp_pos, sp_neg, sp_abs) if x is not None]
         return min(vals) if vals else None
-    raise ValueError(f"Unknown metric: {metric}")
+
+    raise ValueError(f"Unsupported threshold metric: {metric}")
 
 
 def _append_summary_rows_csv(path: Path, rows: list[dict[str, Any]], *, write_header: bool) -> None:
