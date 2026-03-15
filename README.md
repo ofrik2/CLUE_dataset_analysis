@@ -155,6 +155,7 @@ Batch supports:
 - resume mode (`batch.execution.resume`)
 - thresholding by rank-agreement ρ (`batch.threshold` + `batch.threshold_metric`)
 - optional saving of “hit” artifacts
+- forwards all shared `pipeline` parameters into the single-signature `run(...)` call (including `signature_ranking` and optional `L`)
 
 ---
 
@@ -239,14 +240,26 @@ Minimum for **batch**:
 | Key | Type | Required | Default | Meaning |
 |---|---:|:---:|---:|---|
 | `threshold` | float | no | `0.2` | Flag a signature as a “hit” if `threshold_score < threshold`. |
-| `threshold_metric` | string | no | `"min_all"` | One of: `"pos_all"`, `"neg_all"`, `"min_all"`. See below. |
+| `threshold_metric` | string | no | `"min_all"` | One of: `"pos_all"`, `"neg_all"`, `"abs_all"`, `"abs_topk"`, `"min_all"`. See below. |
 | `top_fractions` | list[float] | no | `[0.1]` | When saving hit artifacts, also compute/record zoom stats for these fractions (implementation-dependent). |
 
 `threshold_metric` meaning (based on Spearman ρ values):
 
-- `pos_all`: use ρ for `pos`
-- `neg_all`: use ρ for `neg`
-- `min_all`: use `min(ρ_pos, ρ_neg)`
+- `pos_all`: threshold_score = `spearman_pos_full`
+- `neg_all`: threshold_score = `spearman_neg_full`
+- `abs_all`: threshold_score = `spearman_abs_full`
+- `abs_topk`: threshold_score = `spearman_abs_topk` if available, else fallback to `spearman_abs_full`
+- `min_all`: threshold_score = `min(full scores across available directions)`
+  - in `signed_split`: `min(spearman_pos_full, spearman_neg_full)`
+  - in `abs`: `spearman_abs_full`
+
+Important: in this project batch is used to find **disagreement** between methods, so a signature is a hit when:
+
+- `threshold_score < threshold`
+
+For abs-mode disagreement screening, recommended config is:
+
+- `"threshold_metric": "abs_topk"`
 
 #### Outputs
 
@@ -342,6 +355,22 @@ If `pipeline.spearman_plot_zoom_top_fraction` is set (default `0.1`), it also co
 
 This zoom subset is what the zoomed plot displays, and the zoom ρ is computed on exactly that subset.
 
+### Spearman values in batch summary (direction-aware schema)
+
+Because `signature_ranking` can change the set of directions, the batch summary schema is direction-dependent:
+
+- In `signed_split` mode, directions are `pos` and `neg`
+  - `spearman_pos_full`, `spearman_pos_topk`
+  - `spearman_neg_full`, `spearman_neg_topk`
+- In `abs` mode, direction is only `abs`
+  - `spearman_abs_full`, `spearman_abs_topk`
+
+Where:
+
+- `*_full` = Spearman ρ over the full per-direction pathway ranking
+- `*_topk` = Spearman ρ over the zoomed subset (top fraction; see `pipeline.spearman_plot_zoom_top_fraction`)
+  - if the zoom subset is not computed/available, it may be omitted or fall back in thresholding (see `abs_topk`)
+
 ---
 
 ## Development notes
@@ -358,3 +387,30 @@ If you see import errors at runtime, install the missing packages into your envi
 ### What is the `*.egg-info/` folder?
 
 When you install the package (especially editable installs), setuptools may create a `clue_pathway_enrichment.egg-info/` directory containing metadata (entry points, dependency info, etc.). It’s normal and can be ignored.
+
+## Batch progress behavior (esp. multiprocessing)
+
+Batch prints:
+
+- a Zarr loading progress indicator (when enabled)
+- cumulative status lines (done / skipped / errors / hits)
+
+In multiprocessing mode, the parent process typically receives results only when a worker **chunk/block** completes. So “progress” reflects:
+
+- completed blocks
+- cumulative counts so far
+
+To keep logs readable, per-block noisy tqdm bars are suppressed in multiprocessing output.
+
+## Resume behavior
+
+Batch supports resume:
+
+- previously processed `sig_id`s are loaded from the existing summary output
+- only remaining signatures will be processed
+
+Debugging caveat:
+
+- if you changed the output schema (e.g., added new `spearman_*_topk` columns or switched to `abs` mode),
+  consider starting fresh (`resume=false` or a new summary path) so older rows do not mask the new schema.
+

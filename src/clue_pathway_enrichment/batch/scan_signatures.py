@@ -9,7 +9,6 @@ from typing import List, Dict, Tuple, Any, Optional, Iterable
 import numpy as np
 import pandas as pd
 import zarr
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 import multiprocessing as mp
 
@@ -98,9 +97,16 @@ def _process_block_worker(
                 "hit": False,
                 "threshold_metric": metric,
                 "threshold": float(threshold),
-                "spearman_pos": None,
-                "spearman_neg": None,
+                "spearman_pos_full": None,
+                "spearman_pos_topk": None,
+                "spearman_neg_full": None,
+                "spearman_neg_topk": None,
+                "spearman_abs_full": None,
+                "spearman_abs_topk": None,
                 "threshold_score": None,
+                "n_pathways_pos": None,
+                "n_pathways_neg": None,
+                "n_pathways_abs": None,
             })
         return rows, [], len(sig_ids_block)
 
@@ -135,13 +141,16 @@ def _process_block_worker(
 
             res_df, spearman_by_dir = run(signature_path=sig_df, **pipeline_kwargs)
 
-            sp_pos = _safe_float(spearman_by_dir.get("pos"))
-            sp_neg = _safe_float(spearman_by_dir.get("neg"))
-            sp_abs = _safe_float(spearman_by_dir.get("abs"))
+            sp_pos_full, sp_pos_topk = _extract_rank_metric(spearman_by_dir.get("pos"))
+            sp_neg_full, sp_neg_topk = _extract_rank_metric(spearman_by_dir.get("neg"))
+            sp_abs_full, sp_abs_topk = _extract_rank_metric(spearman_by_dir.get("abs"))
 
-            row["spearman_pos"] = sp_pos
-            row["spearman_neg"] = sp_neg
-            row["spearman_abs"] = sp_abs
+            row["spearman_pos_full"] = sp_pos_full
+            row["spearman_pos_topk"] = sp_pos_topk
+            row["spearman_neg_full"] = sp_neg_full
+            row["spearman_neg_topk"] = sp_neg_topk
+            row["spearman_abs_full"] = sp_abs_full
+            row["spearman_abs_topk"] = sp_abs_topk
 
             if isinstance(res_df, pd.DataFrame) and "direction" in res_df.columns:
                 row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
@@ -152,8 +161,15 @@ def _process_block_worker(
                 row["n_pathways_neg"] = None
                 row["n_pathways_abs"] = None
 
-            score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg, sp_abs)
-
+            score_for_threshold = _compute_threshold_score(
+                metric,
+                sp_pos_full,
+                sp_pos_topk,
+                sp_neg_full,
+                sp_neg_topk,
+                sp_abs_full,
+                sp_abs_topk,
+            )
             row["threshold_score"] = score_for_threshold
             row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
 
@@ -164,10 +180,16 @@ def _process_block_worker(
             n_errors += 1
             row["status"] = "error"
             row["error_msg"] = f"{type(e).__name__}: {e}"
-            row["spearman_pos"] = None
-            row["spearman_neg"] = None
-            row["spearman_abs"] = None
+            row["spearman_pos_full"] = None
+            row["spearman_pos_topk"] = None
+            row["spearman_neg_full"] = None
+            row["spearman_neg_topk"] = None
+            row["spearman_abs_full"] = None
+            row["spearman_abs_topk"] = None
             row["threshold_score"] = None
+            row["n_pathways_pos"] = None
+            row["n_pathways_neg"] = None
+            row["n_pathways_abs"] = None
             row["hit"] = False
 
         row["runtime_sec"] = round(time.time() - t0, 4)
@@ -268,7 +290,7 @@ def scan_signatures(
         raise ValueError(f"chunk_size must be >= 1. Got: {chunk_size}")
 
     metric = str(threshold_metric).strip().lower()
-    supported_metrics = {"pos_all", "neg_all", "min_all", "abs_all"}
+    supported_metrics = {"pos_all", "neg_all", "min_all", "abs_all", "abs_topk"}
 
     if metric not in supported_metrics:
         raise ValueError(
@@ -396,13 +418,16 @@ def scan_signatures(
                     show_progress=False,
                 )
 
-                sp_pos = _safe_float(spearman_by_dir.get("pos"))
-                sp_neg = _safe_float(spearman_by_dir.get("neg"))
-                sp_abs = _safe_float(spearman_by_dir.get("abs"))
+                sp_pos_full, sp_pos_topk = _extract_rank_metric(spearman_by_dir.get("pos"))
+                sp_neg_full, sp_neg_topk = _extract_rank_metric(spearman_by_dir.get("neg"))
+                sp_abs_full, sp_abs_topk = _extract_rank_metric(spearman_by_dir.get("abs"))
 
-                row["spearman_pos"] = sp_pos
-                row["spearman_neg"] = sp_neg
-                row["spearman_abs"] = sp_abs
+                row["spearman_pos_full"] = sp_pos_full
+                row["spearman_pos_topk"] = sp_pos_topk
+                row["spearman_neg_full"] = sp_neg_full
+                row["spearman_neg_topk"] = sp_neg_topk
+                row["spearman_abs_full"] = sp_abs_full
+                row["spearman_abs_topk"] = sp_abs_topk
 
                 if "direction" in res_df.columns:
                     row["n_pathways_pos"] = int((res_df["direction"] == "pos").sum())
@@ -413,8 +438,15 @@ def scan_signatures(
                     row["n_pathways_neg"] = 0
                     row["n_pathways_abs"] = int(len(res_df)) if pipeline_cfg.signature_ranking == "abs" else 0
 
-                score_for_threshold = _compute_threshold_score(metric, sp_pos, sp_neg, sp_abs)
-
+                score_for_threshold = _compute_threshold_score(
+                    metric,
+                    sp_pos_full,
+                    sp_pos_topk,
+                    sp_neg_full,
+                    sp_neg_topk,
+                    sp_abs_full,
+                    sp_abs_topk,
+                )
                 row["threshold_score"] = score_for_threshold
                 row["hit"] = (score_for_threshold is not None) and (score_for_threshold < threshold)
 
@@ -434,6 +466,17 @@ def scan_signatures(
                 n_errors += 1
                 row["status"] = "error"
                 row["error_msg"] = f"{type(e).__name__}: {e}"
+                row["spearman_pos_full"] = None
+                row["spearman_pos_topk"] = None
+                row["spearman_neg_full"] = None
+                row["spearman_neg_topk"] = None
+                row["spearman_abs_full"] = None
+                row["spearman_abs_topk"] = None
+                row["threshold_score"] = None
+                row["n_pathways_pos"] = None
+                row["n_pathways_neg"] = None
+                row["n_pathways_abs"] = None
+                row["hit"] = False
 
             row["runtime_sec"] = round(time.time() - t0, 4)
             buffer_rows.append(row)
@@ -511,6 +554,17 @@ def scan_signatures(
             )
 
 
+    if summary_is_parquet:
+        _convert_csv_to_parquet(summary_csv_path, summary_path_p)
+
+    print(
+        f"[batch] finished. total={n_total} done={n_done} skipped={n_skipped} "
+        f"errors={n_errors} hits={n_hits} summary={summary_path}"
+    )
+
+
+
+
 # -------------------------
 # Internal helpers
 # -------------------------
@@ -538,29 +592,54 @@ def _safe_float(x: Any) -> Optional[float]:
         return None
     return v
 
+def _extract_rank_metric(x: Any) -> tuple[Optional[float], Optional[float]]:
+    """
+    Accept either:
+    - scalar float/int
+    - {"full": float, "top_k": float}
+
+    Returns:
+        (full_value, topk_value)
+    """
+    if x is None:
+        return None, None
+
+    if isinstance(x, dict):
+        full_val = _safe_float(x.get("full"))
+        topk_val = _safe_float(x.get("top_k"))
+        return full_val, topk_val
+
+    val = _safe_float(x)
+    return val, None
 
 def _compute_threshold_score(
     metric: str,
-    sp_pos: Optional[float],
-    sp_neg: Optional[float],
-    sp_abs: Optional[float],
+    sp_pos_full: Optional[float],
+    sp_pos_topk: Optional[float],
+    sp_neg_full: Optional[float],
+    sp_neg_topk: Optional[float],
+    sp_abs_full: Optional[float],
+    sp_abs_topk: Optional[float],
 ) -> Optional[float]:
     metric = str(metric).strip().lower()
 
     if metric == "pos_all":
-        return sp_pos
+        return sp_pos_full
 
     if metric == "neg_all":
-        return sp_neg
+        return sp_neg_full
 
     if metric == "abs_all":
-        return sp_abs
+        return sp_abs_full
+
+    if metric == "abs_topk":
+        return sp_abs_topk if sp_abs_topk is not None else sp_abs_full
 
     if metric == "min_all":
-        vals = [x for x in (sp_pos, sp_neg, sp_abs) if x is not None]
+        vals = [v for v in (sp_pos_full, sp_neg_full, sp_abs_full) if v is not None]
         return min(vals) if vals else None
 
-    raise ValueError(f"Unsupported threshold metric: {metric}")
+    raise ValueError(f"Unknown metric: {metric}")
 
 
 def _append_summary_rows_csv(path: Path, rows: list[dict[str, Any]], *, write_header: bool) -> None:

@@ -29,7 +29,7 @@
     "sig_ids_path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/sig_ids.txt",
 
     "threshold": 0.8,
-    "threshold_metric": "min_all",
+    "threshold_metric": "abs_topk",
     "top_fractions": [0.1],
 
     "outputs": {
@@ -40,7 +40,7 @@
 
     "execution": {
       "resume": true,
-      "max_signatures": null,
+      "max_signatures": 200,
       "n_workers": 4,
       "chunk_size": 50
     }
