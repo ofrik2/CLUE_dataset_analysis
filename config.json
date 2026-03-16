@@ -4,7 +4,7 @@
     "direction": "both",
     "signature_ranking": "abs",
     "alpha": 0.2,
-    "n_perm": 200,
+    "n_perm": 181600,
     "seed": 0,
     "X": 1,
 
@@ -13,12 +13,12 @@
   },
 
   "single_run": {
-    "signature_path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/signatures/LUNG001_IMR90_24H_BRD_K54330070_10.csv",
-    "output_dir": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10_dir.csv",
-    "output_csv": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10.csv",
-    "output_spearman_json": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10.json",
-    "output_spearman_plot": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10.png",
-    "output_spearman_plot_zoom": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/LUNG001_IMR90_24H_BRD_K54330070_10_zoom.png"
+    "signature_path": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/signatures/DOSBIO002_A375_24H_BRD_K31175437_9.99098.csv",
+    "output_dir": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/DOSBIO002_A375_24H_BRD_K31175437_9.99098_dir.csv",
+    "output_csv": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/DOSBIO002_A375_24H_BRD_K31175437_9.99098.csv",
+    "output_spearman_json": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/DOSBIO002_A375_24H_BRD_K31175437_9.99098.json",
+    "output_spearman_plot": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/DOSBIO002_A375_24H_BRD_K31175437_9.99098.png",
+    "output_spearman_plot_zoom": "/Users/ofrikutchinsky/Desktop/Thesis/CLUE_datasets/results/DOSBIO002_A375_24H_BRD_K31175437_9.99098_zoom.png"
   },
 
   "batch": {

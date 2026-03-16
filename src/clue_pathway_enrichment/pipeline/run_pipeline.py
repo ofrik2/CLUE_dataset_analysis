@@ -82,19 +82,24 @@ def run(
         print(f"direction={d}, N_list={N_list}, L_input={L}, L_current={L_current}")
 
         desc = f"scoring pathways ({d})"
-        # iterating pathways
-        for pname, geneset in _iter_with_progress(
-            pathway_items,
-            total=total_pathways,
-            desc=desc,
-            enabled=show_progress,
+        direction_offset = enabled.index(d) * total_pathways
+
+        for idx, (pname, geneset) in enumerate(
+                _iter_with_progress(
+                    pathway_items,
+                    total=total_pathways,
+                    desc=desc,
+                    enabled=show_progress,
+                )
         ):
             v = pathway_to_binary_vector(ranked, geneset)
             k = int(v.sum())
             if k == 0:
                 continue
 
-            rra_stat, rra_p = run_alpha_rra(v, alpha=alpha, n_perm=n_perm, seed=seed)
+            pathway_seed = None if seed is None else int(seed) + direction_offset + idx
+
+            rra_stat, rra_p = run_alpha_rra(v, alpha=alpha, n_perm=n_perm, seed=pathway_seed)
             xlmhg_stat, xlmhg_p = run_xlmhg(v, X=X, L=L_current)
 
             rows.append({
