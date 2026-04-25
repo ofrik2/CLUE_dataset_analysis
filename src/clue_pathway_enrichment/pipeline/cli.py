@@ -53,6 +53,21 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable the per-pathway progress bar / ETA.",
     )
+
+    p.add_argument(
+        "--alpha-rra-n-workers",
+        type=int,
+        default=None,
+        help="Number of worker processes for inner alpha-RRA permutation testing.",
+    )
+
+    p.add_argument(
+        "--alpha-rra-mp-chunk-size",
+        type=int,
+        default=None,
+        help="Chunk size for inner alpha-RRA permutation multiprocessing.",
+    )
+
     return p
 
 
@@ -77,6 +92,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     seed = args.seed if args.seed is not None else pipe_cfg.seed
     X = args.X if args.X is not None else pipe_cfg.X
     L = args.L if args.L is not None else pipe_cfg.L
+
+    alpha_rra_n_workers = (
+        args.alpha_rra_n_workers
+        if args.alpha_rra_n_workers is not None
+        else pipe_cfg.alpha_rra_n_workers
+    )
+
+    alpha_rra_mp_chunk_size = (
+        args.alpha_rra_mp_chunk_size
+        if args.alpha_rra_mp_chunk_size is not None
+        else pipe_cfg.alpha_rra_mp_chunk_size
+    )
 
     output_csv = args.output_csv if args.output_csv is not None else single_cfg.output_csv
     output_spearman = args.output_spearman_json if args.output_spearman_json is not None else single_cfg.output_spearman_json
@@ -108,6 +135,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         seed=seed,
         X=X,
         L=L,
+        alpha_rra_n_workers=alpha_rra_n_workers,
+        alpha_rra_mp_chunk_size=alpha_rra_mp_chunk_size,
         # output_spearman_plot=output_spearman_plot,  # <-- wire through
         # output_spearman_plot_zoom=output_spearman_plot_zoom,
         spearman_plot_zoom_top_fraction=spearman_plot_zoom_top_fraction,

@@ -8,6 +8,8 @@
 
 import numpy as np
 from scipy.stats import beta as beta_dist
+from concurrent.futures import ProcessPoolExecutor
+from typing import Optional
 
 
 def binary_vector_to_ranks(v):
@@ -81,7 +83,36 @@ def alpha_rra_rho_from_ranks(ranks, M, alpha=0.05):
     return rho_alpha
 
 
-def alpha_rra_test(v, alpha=0.05, n_permutations=1000, random_state=None):
+def _count_null_le_chunk(
+    *,
+    N: int,
+    K: int,
+    alpha: float,
+    rho_obs: float,
+    n_permutations: int,
+    seed: Optional[int],
+) -> int:
+    """
+    Run a chunk of permutation tests and return how many null rho values
+    are <= the observed rho.
+    """
+    rng = np.random.default_rng(seed)
+
+    count_le = 0
+    for _ in range(n_permutations):
+        perm_indices = rng.choice(N, size=K, replace=False)
+        ranks_perm = perm_indices + 1
+        rho_perm = alpha_rra_rho_from_ranks(ranks_perm, M=N, alpha=alpha)
+        if rho_perm <= rho_obs:
+            count_le += 1
+
+    return int(count_le)
+
+def _count_null_le_chunk_from_dict(kwargs) -> int:
+    return _count_null_le_chunk(**kwargs)
+
+
+def alpha_rra_test(v, alpha=0.05, n_permutations=1000, random_state=None, n_workers: int = 1, mp_chunk_size: Optional[int] = None):
     """
     Full alpha-RRA test on a single binary vector v.
 
@@ -100,8 +131,6 @@ def alpha_rra_test(v, alpha=0.05, n_permutations=1000, random_state=None):
         are used in the RRA statistic.
     n_permutations : int, default 1000
         Number of permutations for empirical p-value.
-    random_state : int or numpy.random.Generator or None
-        Seed or RNG for reproducibility. If None, a new Generator is used.
 
     Returns
     -------
@@ -118,11 +147,6 @@ def alpha_rra_test(v, alpha=0.05, n_permutations=1000, random_state=None):
     v = np.asarray(v, dtype=int)
     N = v.size
 
-    # Prepare RNG
-    if isinstance(random_state, np.random.Generator):
-        rng = random_state
-    else:
-        rng = np.random.default_rng(random_state)
 
     # Observed statistic
     ranks_obs = binary_vector_to_ranks(v)
@@ -133,14 +157,55 @@ def alpha_rra_test(v, alpha=0.05, n_permutations=1000, random_state=None):
         # No hits or no evidence => p-value is 1.0
         return float(rho_obs), 1.0
 
-    # Permutation-based null: reshuffle the hit positions
-    count_le = 0
-    for _ in range(n_permutations):
-        perm_indices = rng.choice(N, size=K, replace=False)
-        ranks_perm = perm_indices + 1
-        rho_perm = alpha_rra_rho_from_ranks(ranks_perm, M=N, alpha=alpha)
-        if rho_perm <= rho_obs:
-            count_le += 1
+    if n_workers < 1:
+        raise ValueError(f"n_workers must be >= 1, got: {n_workers}")
+
+    if mp_chunk_size is None:
+        # sensible default: a few chunks per worker
+        mp_chunk_size = max(1000, int(np.ceil(n_permutations / max(1, n_workers * 4))))
+
+    if mp_chunk_size < 1:
+        raise ValueError(f"mp_chunk_size must be >= 1, got: {mp_chunk_size}")
+
+    # Build chunk sizes that sum exactly to n_permutations
+    chunk_sizes = []
+    remaining = int(n_permutations)
+    while remaining > 0:
+        chunk = min(mp_chunk_size, remaining)
+        chunk_sizes.append(chunk)
+        remaining -= chunk
+
+    # Serial path
+    if n_workers == 1 or len(chunk_sizes) == 1:
+        count_le = 0
+        for chunk_idx, chunk_n in enumerate(chunk_sizes):
+            chunk_seed = None if random_state is None else int(random_state) + chunk_idx
+            count_le += _count_null_le_chunk(
+                N=N,
+                K=K,
+                alpha=alpha,
+                rho_obs=rho_obs,
+                n_permutations=chunk_n,
+                seed=chunk_seed,
+            )
+    else:
+        tasks = []
+        for chunk_idx, chunk_n in enumerate(chunk_sizes):
+            chunk_seed = None if random_state is None else int(random_state) + chunk_idx
+            tasks.append(
+                {
+                    "N": N,
+                    "K": K,
+                    "alpha": alpha,
+                    "rho_obs": rho_obs,
+                    "n_permutations": chunk_n,
+                    "seed": chunk_seed,
+                }
+            )
+
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            counts = ex.map(_count_null_le_chunk_from_dict, tasks)
+            count_le = int(sum(counts))
 
     p_emp = (count_le + 1.0) / (n_permutations + 1.0)
     return float(rho_obs), float(p_emp)

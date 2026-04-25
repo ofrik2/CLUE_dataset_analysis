@@ -4,12 +4,14 @@
     "direction": "both",
     "signature_ranking": "abs",
     "alpha": 0.2,
-    "n_perm": 181600,
+    "n_perm": 2000,
     "seed": 0,
-    "X": 1,
+    "X": 2,
 
     "spearman_plot_zoom_top_fraction": 0.1,
-    "show_progress": true
+    "show_progress": true,
+    "alpha_rra_n_workers": 4,
+    "alpha_rra_mp_chunk_size": 5000
   },
 
   "single_run": {

@@ -68,6 +68,10 @@ class PipelineConfig:
     # zoomed rank agreement plot
     spearman_plot_zoom_top_fraction: float = 0.1
 
+    # parallel workers on permutation test (alpha-RRA)
+    alpha_rra_n_workers: int = 1
+    alpha_rra_mp_chunk_size: Optional[int] = None
+
     # UX / logging
     show_progress: bool = True
 
@@ -96,6 +100,14 @@ class PipelineConfig:
         pc = Path(self.pathway_csv)
         if not pc.exists():
             raise FileNotFoundError(f"pathway_csv does not exist: {pc}")
+        if self.alpha_rra_n_workers < 1:
+            raise ValueError(
+                f"alpha_rra_n_workers must be >= 1, got: {self.alpha_rra_n_workers}"
+            )
+        if self.alpha_rra_mp_chunk_size is not None and self.alpha_rra_mp_chunk_size < 1:
+            raise ValueError(
+                f"alpha_rra_mp_chunk_size must be >= 1 when provided, got: {self.alpha_rra_mp_chunk_size}"
+            )
 
 
 @dataclass(frozen=True)
@@ -221,6 +233,8 @@ def load_pipeline_config(path: Union[str, Path]) -> PipelineConfig:
         L=_coerce_int_or_none(table.get("L", None)),
         spearman_plot_zoom_top_fraction=float(table.get("spearman_plot_zoom_top_fraction", 0.1)),
         show_progress=bool(table.get("show_progress", True)),
+        alpha_rra_n_workers=int(table.get("alpha_rra_n_workers", 1)),
+        alpha_rra_mp_chunk_size=_coerce_int_or_none(table.get("alpha_rra_mp_chunk_size", None)),
     )
     cfg.validate()
     return cfg

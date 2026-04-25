@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional , Union
 import pandas as pd
 import math
 
@@ -34,7 +34,7 @@ def _iter_with_progress(it, *, total: int, desc: str, enabled: bool):
 
 
 def run(
-    signature_path: str | pd.DataFrame,
+    signature_path: Union[str, pd.DataFrame],
     pathway_csv: str,
     direction: str = "both", # "pos" | "neg" | "both". if "abs" is used, a direction is both but has no meaning
     signature_ranking: str = "signed_split",
@@ -47,6 +47,8 @@ def run(
     output_spearman_plot_zoom: Optional[str] = None,  # e.g. "out/rank_agreement_top10pct_{direction}.png"
     spearman_plot_zoom_top_fraction: float = 0.1,
     show_progress: bool = True,
+    alpha_rra_n_workers: int = 1,
+    alpha_rra_mp_chunk_size: Optional[int] = None,
 ) -> tuple[pd.DataFrame, dict[str, float] | dict[str, dict[str, float]]]:
     if isinstance(signature_path, str):
         sig = load_signature_table(signature_path)
@@ -99,7 +101,15 @@ def run(
 
             pathway_seed = None if seed is None else int(seed) + direction_offset + idx
 
-            rra_stat, rra_p = run_alpha_rra(v, alpha=alpha, n_perm=n_perm, seed=pathway_seed)
+            rra_stat, rra_p = run_alpha_rra(
+                v,
+                alpha=alpha,
+                n_perm=n_perm,
+                seed=pathway_seed,
+                n_workers=alpha_rra_n_workers,
+                mp_chunk_size=alpha_rra_mp_chunk_size,
+            )
+
             xlmhg_stat, xlmhg_p = run_xlmhg(v, X=X, L=L_current)
 
             rows.append({
